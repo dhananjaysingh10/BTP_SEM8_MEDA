@@ -1,0 +1,1051 @@
+Layout-Aware Solution Preparation for Biochemical Analysis on a
+Digital Microﬂuidic Biochip*
+Sudip Roy†, Bhargab B. Bhattacharya‡, Partha P. Chakrabarti† and Krishnendu Chakrabarty§
+†Dept. of CSE, Indian Institute of Technology Kharagpur, India {sudipr, ppchak@cse.iitkgp.ernet.in}
+‡ACM Unit, Indian Statistical Institute, Kolkata, India {bhargab@isical.ac.in}
+§Dept. of ECE, Duke University, Durham, USA {krish@ee.duke.edu}
+Abstract—A biochemical analysis is based on several labo-
+ratory protocols that require repeated mixing of samples with
+reagents. Sample preparation and analyte identiﬁcation steps
+in such bioassays often involve mixing for solution preparation,
+i.e., various ﬂuids are to be mixed in a certain volumetric ratio
+in their resulting mixture. We present an efﬁcient approach
+for automated mixing of three or more ﬂuids on a droplet-
+based digital microﬂuidic biochip and design a layout for
+implementing this algorithm. The proposed method reduces the
+droplet transportation time from boundary reservoirs to on-
+chip mixers as well as cross-contamination among overlapping
+droplet routing paths. Simulation of several example solutions
+reveals encouraging results.
+I. INTRODUCTION
+Digital microﬂuidic (DMF) biochips have now matured
+into a potential technology for implementing biochemical
+laboratory protocols (i.e., bioassays) on a single chip of a
+few square centimeters in size [1]–[4]. Such portable lab-on-
+a-chips (LoCs) have tremendous potential for point-of-care
+clinical diagnostics, and the timely detection of cardiovascu-
+lar diseases, cancer, diabetes, and HIV/AIDS crisis, on-site
+biochemical analysis, analyte detection, DNA sequencing by
+synthesis, and tissue engineering. For the control of DMF
+biochips, automation for the user, and technology exploita-
+tion, there is a pressing need for advances in computer-aided
+design algorithms and techniques. A schematic diagram of
+the top view of a DMF biochip is shown in Fig. 1(a) and the
+cross-sectional view of a basic cell at a detection site of a
+DMF biochip is shown in Fig. 1(b). Detailed descriptions of
+DMF biochips and their applications can be found in [1], [2],
+[5]. DMF-based LoCs use electrical actuation to manipulate
+(transporting, merging, splitting, mixing, dispensing, etc.)
+discrete nanoliter/picoliter volume of the sample or reagent
+ﬂuids (called droplets) on a two-dimensional electrode array.
+Droplet movement is achieved by a special phenomenon
+called electrowetting-on-dielectric (EWOD) effect [5].
+The basic idea of a microﬂuidic biochip is to integrate
+multiple assay operations such as detection, sample pre-
+treatment, and sample preparation on one chip. Front-end
+functions for solution preparation — mixing of more than
+two different reagent ﬂuids and dilution of a sample/reagent
+with a buffer solution (i.e., mixing of two different ﬂuids)
+*This work of S. Roy was supported in part by Microsoft India Research
+PhD Fellowship. The work of K. Chakrabarty was supported in part by
+the National Science Foundation under grants CCF-0914895 and OISE-
+1041708.
+Sample
+Droplet
+Reagent
+Droplet
+Droplet
+Mixed
+Electrode
+Detection
+Site
+Electrical Pads
+Electrical
+Pads
+(a)
+Glass
+Glass
+Droplet
+1 cSt Silicone
+oil (filler fluid)
+Teflon AF
+Parylene
+ITO electrodes
+Oxide (ITO)
+Indium Tin
+Photodiode
+LED
+(b)
+Figure 1: (a) Top view of a digital microﬂuidic biochip and
+(b) cross-sectional view of a cell at a detection site [1].
+— are to be performed on-chip. Mixing and dilution of
+ﬂuids are fundamental preprocessing steps in almost all bio-
+analytical protocols [6]–[10]. For example, a real-life bioas-
+say is “Blackburn Yeast Colony PCR”, where a master mix
+solution needs to be prepared by mixing 2µL 5X Q-solution,
+1µL PCR buffer, 0.2µL dNTPs, 0.2µL forward primer, 0.2µL
+reverse primer, 0.1µL Taq and 5.3µL water [9]. Thus, here
+the target ratio of these seven ﬂuids is 20 : 10 : 2 : 2 : 2 : 1 : 53.
+In this paper, we present a layout-aware mixing algorithm
+for automatic solution preparation of several sample/reagent
+ﬂuids. The proposed algorithm uses an algebraic decompo-
+sition approach that determines the mix-split steps required
+to produce the solution with a target ratio. It produces a
+sequence of reagent mixing steps (visualized as a “mixing
+tree”), in which at each step two droplets of two different
+ﬂuids are mixed both drawn from the reservoirs, or one from
+a reservoir (or on-chip storage location) and the other already
+residing at the mixing module. It has the following important
+attributes:
+• The proposed mixing algorithm can be used for au-
+tomatic solution preparation on-chip with a desired
+accuracy of the concentration factors of its constituents.
+• The “mixing tree” has longer sub-sequences of mixing
+steps with a small number of distinct ﬂuids (called
+“dilution/mixing subtrees”); this property helps in al-
+locating the reservoirs to the samples/reagents in the
+proximity of the assigned mixers, which in turn reduces
+droplet transportation time for moving them from the
+reservoirs to the designated mixing modules.
+• The proposed method leads to several disjoint “di-
+lution/mixing subtrees” in the “mixing tree”; this
+property aids in reducing the probability of cross-
+contamination [11] among various droplet routing paths
+2011 24th Annual Conference on VLSI Design
+1063-9667/11 $26.00 © 2011 IEEE
+DOI 10.1109/VLSID.2011.55
+171
+
+from the reservoirs to a mixing module.
+II. AUTOMATIC SOLUTION PREPARATION
+In many biochemical protocols, solution preparation is
+a preprocessing step for mixing two or more ﬂuids in a
+given ratio. Dilution of a biochemical sample is the special
+case of solution preparation where it is mixed with the
+buffer solution at a certain ratio corresponding to the desired
+concentration factor. In this paper, we use the (1 : 1)-
+mixing model, where two unit-volume (1V) ﬂuid droplets
+are mixed together and after each mix operation, a split
+operation splits the 2V-volume mixture equally into two 1V-
+volume droplets. Next, one 1V-volume droplet is used in the
+subsequent mixing step, while the other droplet is discarded
+as a waste droplet. One mix operation followed by a split
+operation is called a mix/split cycle.
+In general, consider a set of n different ﬂuids x1,...,xn
+with unlimited supplies of each xi (i = 1 to n). For a
+given target ratio A = a1 : ... : an, where L =
+n
+∑
+i=1
+ai is
+the sum of ratio components ai’s (non-zero positive in-
+tegers), the target solution can be represented by an al-
+gebraic expression X(n) = a1x1 +...+anxn
+L
+, x1,...,xn are
+the variable names corresponding to n ﬂuids. For exam-
+ple, a solution of seven ﬂuids with a ratio 2 : 3 : 5 : 7 :
+11 : 13 : 87 can be represented by the expression X(7) =
+2x1 +3x2 +5x3 +7x4 +11x5 +13x6 +87x7
+128
+, where L = 128
+and x1,...,x7 are seven different ﬂuids. The concentration
+factors of n different ﬂuids in the target solution can be
+represented by c1,...,cn, respectively, where ci = ai
+L , such
+that ∑n
+i=1 ci = 1.
+A mixing tree is a binary tree representation of (1 : 1)-
+mix/split steps for the solution preparation of several ﬂuids.
+An example mixing tree is shown in Fig. 2(a) for a target
+ratio 2 : 3 : 5 : 7 : 11 : 13 : 87 of seven ﬂuids. In a mixing
+level=7
+level=6
+level=5
+level=4
+level=3
+level=2
+level=1
+level=0
+x7
+x7
+x6
+x5
+x4
+x2
+x3
+x6
+x7
+x7
+x5
+x6
+x4
+x7
+x5
+x3
+x2
+t2
+t1
+t3
+t4
+t5
+t6
+x1
+t7
+t8
+t9
+t10
+t11
+t14
+t13
+t12
+t15
+t16
+t17
+t18
+x4
+m=18
+p=4
+l=6
+d=7
+M1
+M1
+M1
+M2
+M2
+M2
+M1
+M1
+M2
+M2
+M2
+M2
+M1
+M2
+M2
+M2
+M2
+M1
+(a)
+Target Ratio =
+2 : 3 : 5 : 7 : 11 : 13 : 87
+     
+     
+0 0 0 0 0 1 02
+x2: 0 0 0 0 0 1 12
+x3: 0 0 0 0 1 0 12
+x4: 0 0 0 0 1 1 12
+x5: 0 0 0 1 0 1 12
+x6: 0 0 0 1 1 0 12
+x7: 1 0 1 0 1 1 12
+x1:
+(b)
+Figure 2: Example ratio 2 : 3 : 5 : 7 : 11 : 13 : 87. (a) Mixing
+tree obtained by [6] and (b) Bit-representations of the ratio.
+tree, each leaf node corresponds to a 1V droplet and an
+internal (or non-leaf) node denotes a 1V droplet of the
+mixture obtained after a (1 : 1)-mix/split step with two 1V
+ﬂuid droplets corresponding to its two child nodes. A post-
+order traversal of the mixing tree provides the sequence of
+(1 : 1)-mix/split steps required to produce the target solution
+(of n ﬂuids) denoted by the root of the tree. The total
+number of internal nodes in a mixing tree, denoted by m,
+is the total number of mix/split cycles required to obtain
+the target solution from the supplies. The depth of a mixing
+tree is denoted by d and the number of internal nodes at any
+particular level is the number of mixing modules required
+in the layout to complete all the mix/split operations of that
+level in only one mix/split cycle by concurrently executing
+them. Over all the d levels of the mixing tree, the maximum
+number of internal nodes at any level is the degree of
+parallelism (denoted by p) of the mixing tree. Hence, if this
+mixing tree is implemented on the biochip, then p indicates
+the minimum number of mixing modules required in the
+chip layout to produce the target solution in only d mix/split
+cycles. Otherwise, if there are fewer number of mixing
+modules in the layout, then more than d mix/split cycles
+are required for this solution preparation. A longest subtree
+(with only one internal nodes at each level) of the mixing
+tree is a dilution/mixing subtree with a limited number
+(typically 2 to 4) of distinct leaf nodes (distinct ﬂuids).
+In a mixing tree, there may exist multiple dilution/mixing
+subtrees of different depths in different branches of the
+mixing tree. The sum of depths of all the dilution/mixing
+subtrees in a mixing tree is denoted by l. A dilution subtree
+in a mixing tree represents mixing of only two ﬂuids at a
+certain ratio. For the example mixing tree shown in Fig. 2(a)
+the dilution subtrees are shown using shaded regions. For
+this mixing tree m = 18, d = 7, p = 4 and l = 6.
+A. Problem Formulation
+The problem of automatic solution preparation of n ﬂuids
+in a DMF biochip platform can be stated as follows:
+Input: Given a set of n sample/reagent ﬂuids x1,...,xn
+with unlimited supplies of each xi and a target ratio A =
+a1,...,an of n ﬂuids; the error in concentration factor of
+each component ﬂuid be less than
+1
+2d , which implies that
+the depth of the mixing tree is d.
+Output: A mixing tree of depth d denoting the sequence
+of m mix/split cycles t1,...,tm for automatic solution prepa-
+ration in a biochip with the target ratio A of n ﬂuids.
+B. Prior Art on Mixing Algorithm
+A bit-scanning (BS) method for complex mixture prepa-
+ration was proposed in [6]. This method uses binary bit-
+representations of the integers of the target ratio to derive
+a mixing tree denoting the sequence of (1 : 1)-mix/split
+steps for preparing the desired solution. The binary bit-
+representations used to construct the mixing tree of Fig. 2(a)
+172
+
+are shown in Fig. 2(b). In this ﬁgure, each mix/split cycle
+is marked as ti, for i = 1 to 18.
+C. Layout-Aware Solution Preparation
+In practice, the reservoirs for supplying different sam-
+ples/reagents and those for collecting waste or wash ﬂuids
+are located at the periphery of a biochip. Consider a biochip
+with two static mixing modules as shown in Fig. 3. The
+mixing modules, M1 and M2, are three-electrode linear
+array mixers of merge-and-split type (they can act in both
+horizontal and vertical directions). As shown in ﬁgure, there
+are seven reservoirs R1,...,R7 at the boundary of the ﬁxed
+size 2D electrode array for loading the component ﬂuids and
+two waste reservoirs for collecting waste droplets from the
+chip during solution preparation. The arrow signs are used
+to indicate some possible droplet transportation pathways to
+and from the reservoirs and the mixing modules. Assume
+that for each type of ﬂuid there is a dedicated reservoir
+in the biochip. Then, two tasks are to be performed in
+order to map a mixing tree onto a biochip: (a) one-to-one
+mapping of distinct type of ﬂuids to the reservoirs (called as
+reservoir allocation). (b) many-to-one mapping of internal
+nodes to the on-chip mixers (called as mixer assignment).
+If the number of internal nodes in a level of the mixing
+tree (let p denotes the maximum value over all levels) is
+greater than the number of available mixing modules, on-
+chip storage units for intermediate droplets are needed to
+complete the mixing process.
+For the example target ratio 2 : 3 : 5 : 7 : 11 : 13 : 87,
+the mixer assignment to each internal node of the mixing
+tree are shown in Fig. 2(a) as ti →{M1,M2}. A greedy
+method can be used to obtain this mixer assignment and the
+reservoir allocation as shown in Fig. 4(a). Droplet routes can
+be obtained for the mixing subtree rooted at t13 of the mixing
+tree shown in Fig. 2(a) and they are shown using arrows
+in Fig. 4(a). The common electrodes in droplet pathways
+of different ﬂuids are marked using small dots on them
+in Fig. 4(a); these are cross-contaminated. For the example
+shown in Fig. 4(a) three electrodes are cross-contaminated
+during execution of the ﬁve mixing steps in the subtree
+rooted at t13.
+R
+M1
+M2
+2
+R4
+R6
+waste
+R3
+R5
+R7
+R1
+waste
+Figure 3: A biochip layout for solution preparation.
+x
+M1
+M2
+3
+x5
+x6
+waste
+x2
+x7
+x4
+x1
+waste
+(a)
+x
+M1
+M2
+7
+x4
+x1
+waste
+x6
+x5
+x3
+x2
+waste
+(b)
+Figure 4: Droplet routes for the mixing steps of the subtree
+rooted (a) at t13 of the mixing tree in Fig. 2(a) and (b) at
+t16 of the mixing tree in Fig. 5.
+level=7
+level=6
+level=5
+level=4
+level=3
+level=2
+level=1
+x3
+level=0
+x5
+x7
+x1
+x5 t3
+t5
+t7
+t9
+t11
+t12
+t17
+t18
+m=18
+p=4
+d=7
+l=13
+x7
+t15
+x6
+x2
+x6
+t2
+t6
+t10
+t13
+t14
+t16
+x2
+x6
+x5
+x7
+x4
+t1
+t8
+x4
+x7
+x7
+x4
+t4
+x3
+    
+    
+M1
+M1
+M1
+M2
+M1
+M1
+M1
+M1
+M2
+M2
+M1
+M1
+M1
+M1
+M2
+M2
+M2
+M2
+Figure 5: Mixing tree for the example ratio 2 : 3 : 5 : 7 : 11 :
+13 : 87 obtained by algorithm RMA.
+Consider another mixing tree for the above target ratio
+2 : 3 : 5 : 7 : 11 : 13 : 87 as shown in Fig. 5. For this mixing
+tree, the mixer assignment shown in Fig. 5 and the reservoir
+allocation shown in Fig. 4(b) can be obtained using a greedy
+method. The droplet routes obtained for the mixing subtree
+rooted at t16 of the mixing tree (Fig. 5) are shown using
+arrows in Fig. 4(b). Here, the eight mixing steps can be
+performed without any cross-contamination between four
+different ﬂuids. It is observed that, when the mixing tree
+of Fig. 2(a) is executed in the layout, the total number of
+cross-contaminated electrodes becomes nine, whereas for the
+mixing tree of Fig. 5, the number of cross-contaminated
+173
+
+electrodes reduces to four.
+As stated earlier, the reagent ﬂuids are stored in the
+reservoirs located at the periphery of the layout. Hence,
+there is a linear ordering of the reagents whereas the mixers
+in the layout have 2D requirement of reagents from the
+reservoirs. If only a single mixer is used in the chip layout
+for implementing any mixing tree with a degree of paral-
+lelism more than one (p > 1), then the complete solution
+preparation will take m number of mix/split cycles, m is the
+total number of internal nodes in the mixing tree. However,
+for p > 1, the solution preparation process can be made faster
+by providing more mixers in the layout. Then, the two or
+more mixers can be used to concurrently execute two or
+more parallel mix/split steps of the mixing tree. Clearly, the
+mixer assignment and reservoir allocation strongly depend
+on the characteristics of the mixing tree. If the reagents
+needed by different mixers are fewer in number, and the
+intersection between the two sets of different reagents is
+of small cardinality, reservoirs at the proximity of a mixer
+can be allocated favorably for the corresponding reagents to
+be mixed. Further, the chance of cross-contaminations [11]
+among various droplet pathways also reduces.
+For the above example ratio, in the mixing tree of Fig. 5,
+the dilution subtrees are shown by the shaded regions. In
+comparison to the BS method, the second method provides
+a mixing tree with longer dilution subtrees (here l = 13,
+whereas l = 6 for the BS method). This has motivated us to
+ﬁnd an efﬁcient algorithm for automatic solution preparation
+of several ﬂuids. The algorithm needs to provide a mixing
+tree, for which the sequence of mix-split steps can be
+efﬁciently mapped into a given DMF electrode layout with
+a favorable placement of reservoirs on the boundary of the
+biochip. Thus, the objective is to obtain a mixing tree with
+longer dilution/mixing subtrees for a given target ratio.
+III. LAYOUT-AWARE ALGORITHMS FOR SOLUTION
+PREPARATION
+In (1 : 1)-mixing model, at each mixing step the concen-
+tration factor of a sample/reagent in the mixture is obtained
+by the arithmetic mean of concentration factors of two of
+its constituents. Thus, the expression corresponding to the
+concentration factor of target solution (denoted by the root
+of the mixing tree) will have 2d in its denominator, where d
+is a non-zero positive integer denoting depth of the mixing
+tree. Therefore, the value of L is to be approximated as 2d,
+for some d. For example, a target ratio 2 : 3 : 5 : 7 can be
+approximated as 4 : 6 : 9 : 13 that can be used to obtain a
+mixing tree of depth 5 and it can also be approximated as
+120 : 181 : 301 : 422 so that its mixing tree is of depth 10.
+The procedure for approximating the target ratio is described
+as Algorithm 1.
+Observation 1 The Ratio Approximation(A) algorithm
+produces an approximate ratio A′ with an error in concentra-
+tion factor of each component ﬂuid less than
+1
+2d compared
+Algorithm 1 Ratio Approximation(A)
+1: Compute L =
+n
+∑
+i=1
+ai.
+2: if d is the accuracy level of the approximated ratio then
+3:
+Compute the new sum L′ = 2d.
+4: end if
+5: if L ̸= 2b, for any integer b > 0 then
+6:
+Compute d = ⌈log2 L⌉and the new sum L′ = 2d.
+7: end if
+8: Compute the approximated ratio A′ = a′
+1 : ... : a′n as: a′
+1 =
+round-off
+
+L′.a1
+L
+
+,..., a′
+n−1 = round-off
+
+L′.an−1
+L
+
+and a′n =
+L′ −
+n−1
+∑
+i=1
+a′
+i.
+9: If any component in A′ becomes ‘0’, then it is made ‘1’ by
+adjusting the larger components in the new ratio so that the
+new sum still remains L′.
+10: If some components in A are in equal proportions then keep
+the same proportion among them in A′ by adjusting other
+components in the new ratio such that the new sum still remains
+L′.
+to that in the given target ratio A. If the given ratio or the
+approximated ratio be used to determine a mixing tree, then
+its depth will be d.
+A. Fractional Decomposition of the Expression X(n)
+It can shown that, for a target ratio, the algebraic ex-
+pression X(n) = a1x1 +...+anxn
+2d
+can be decomposed into
+a fractional representation as established by the following
+theorem (proof is omitted because of lack of space).
+Theorem 1. If X(n) = a1x1 +...+anxn
+2d
+, where d ≥n
+such that ∑n
+i=1 ai = 2d, where all the ai’s are positive
+integers, then X(n) can always be expressed as a fractional
+decomposition of q (where q ≥d) terms as follows:
+X(n) = ∑
+1
+2
+
+xi1 + 1
+2
+
+xi2 + 1
+2
+
+...+ 1
+2
+
+xi(r−1) +xir
+
+,
+where xi j ∈{x1,x2,...,xn} with repetitions, r ≥n and r < d.
+The quantity q −1 is the number (m) of “+” signs in the
+fractional decomposition. If q−1 = m, then 1 ≤r < m.
+For an example target ratio 2 : 3 : 5 : 7 : 11 : 13 :
+87 that can be represented by the expression X(7) =
+2x1 +3x2 +5x3 +7x4 +11x5 +13x6 +87x7
+128
+, one fractional
+decomposition is as follows:
+X(7)
+=
+1
+2
+1
+2
+1
+2
+1
+2
+1
+2
+1
+2
+1
+2
+
+x4 +x7
+
++x7
+
++x7
+
++
+1
+2
+1
+2
+
+x1 +x4
+
++x4
+
++x7
+
++
+1
+2
+1
+2
+1
+2
+1
+2
+1
+2
+
+x2 +x6
+
++x2
+
++x6
+
++x6
+
++
+1
+2
+1
+2
+1
+2
+1
+2
+
+x3 +x5
+
++x5
+
++x3
+
++x5
+
++x7
+
+Observation 2 (Correspondence between Fractional De-
+composition and Mixing Tree) Mixing of two different
+ﬂuids, say, x1 and x2, in a ratio 1 : 1 produces a mixture
+denoted by the expression x1+x2
+2
+. In the next mixing step,
+174
+
+Algorithm 2 RMA(A,d)
+1: For a target ratio A = a1 : ... : an, call Ratio Approximation(A)
+to obtain the approximated ratio A′ and d; Assign A′ to A and
+L′ to L.
+2: For the algebraic expression X(n) = a1x1 +...+anxn
+L
+, repre-
+sent an expression partition as ⟨P,L⟩, where P = a1x1 + ...+
+anxn = ∑n
+i=1 aixi and L = 2d = ∑n
+i=1 ai.
+3: Create the root node of the mixing tree M with partition ⟨P,L⟩;
+Call PARTITIONING(⟨P,L⟩).
+Algorithm 3 PARTITIONING(⟨P,L⟩)
+1: if L = 1 then
+2:
+Exit.
+3: end if
+4: Call Expression Partition(⟨P,L⟩) and obtain two new partitions
+⟨P1,L1⟩and ⟨P2,L2⟩; Create two child nodes (with these two
+partitions) of the node with ⟨P,L⟩in the mixing tree M.
+5: PARTITIONING(⟨P1,L1⟩).
+6: PARTITIONING(⟨P2,L2⟩).
+one droplet of this mixture is used to mix with a third ﬂuid,
+say x3 in a ratio 1 : 1 to produce a mixture ﬂuid denoted by
+1
+2
+ x1+x2
+2
++x3
+	
+. Continuing this, the fractional representation
+decomposed from the target ratio can be mapped into
+a mixing tree, indicating a sequence of (1 : 1) mix and
+consecutive split operations. Each fractional decomposition
+of the expression for a target ratio can be represented by
+a mixing tree. The depth of the mixing tree is d and the
+total number (1 : 1)-mix/split steps is m, i.e., q −1, where
+q is the number of leaf nodes (denoting the raw ﬂuids) in
+the mixing tree. For example, the fractional decomposition
+of the algebraic expression X(7) as shown above, can be
+directly translated to the mixing tree of Fig. 5 for the given
+target ratio.
+B. Ratioed Mixing Algorithm (RMA)
+In this section, we present an algorithm for automatic
+solution preparation based on fractional decomposition that
+leads to a mixing tree for a given target ratio. The proposed
+ratio-ed mixing algorithm (RMA) is described in Algo-
+rithm 2. The procedure RMA recursively calls the algorithm
+PARTITIONING(⟨P,L⟩) described by Algorithm 3, which
+uses algorithm Expression Partition(⟨P,L⟩) to partition an
+expression (P) into two (P1 and P2) (see Algorithm 4).
+IV. SIMULATION RESULTS
+We simulated both the methods (BS and RMA) for a few
+target ratios of different reagents used in various real-life
+bio-protocols as described in the BioCoder tool [10]. Some
+interesting and relevant results are reported here.
+Consider a target ratio used in “Splinkerette PCR
+method” [10], i.e., 40 : 10 : 1 : 1 : 48. The RMA method
+provides a mixing tree with longer dilution/mixing subtrees
+with less number of distinct leaf nodes (Fig. 6(b)). In
+Algorithm 4 Expression Partition(⟨P,L⟩)
+1: Let au is the highest integer coefﬁcient in P for xu.
+2: Set L1 = L2 = L
+2 .
+3: if au ≥L1 then
+4:
+Create a partition as ⟨P1,L1⟩and another partition as
+⟨P2,L2⟩, where P1 = xu, L1 = 1 and P2 = P−auxu.
+5: else
+6:
+Create two partitions as ⟨P1,L1⟩and ⟨P2,L2⟩, where P1 =
+auxu and P2 = P−auxu.
+7:
+Compute E = L
+2 −au.
+8:
+if E = az, for any coefﬁcient az in ⟨P2,L2⟩for xz then
+9:
+P1 = P1 +azxz and P2 = P2 −azxz.
+10:
+else if E is exactly equal to the sum of n1 number of non-
+zero coefﬁcients in ⟨P2,L2⟩, where n1 < 1
+2×(the number of
+non-zero coefﬁcients in ⟨P2,L2⟩then
+11:
+Move those n1 terms from ⟨P2,L2⟩to ⟨P1,L1⟩.
+12:
+else
+13:
+Let av = the next highest integer coefﬁcient in ⟨P,L⟩of
+xv and av > E.
+14:
+P1 = P1 +Exv and P2 = P2 −Exv.
+15:
+end if
+16: end if
+17: Return two new partitions ⟨P1,L1⟩and ⟨P2,L2⟩.
+level=0
+level=1
+level=2
+level=3
+level=4
+level=5
+level=6
+level=7
+(a) By BS method
+(b) By RMA method
+m=13
+p=2
+x5
+x1
+x2
+x2
+x5
+x5
+x3
+x4
+x1
+x1
+x5
+x2
+x5
+x1
+m=14
+p=3
+x1
+x4 x2
+x3
+x1
+x2
+x1
+x1
+x2
+x2
+x5
+x5
+x5
+x5
+x5
+M1
+M2
+M2
+M2
+M2
+M2
+M1
+M1
+M1
+M1
+M1
+M1
+M2
+M2
+d=7
+d=7
+Figure 6: Mixing trees for the ratio 40 : 10 : 1 : 1 : 48 obtained
+by two methods.
+contrast, the BS method generates a mixing tree as shown in
+Fig. 6(a), which has two dilution/mixing subtrees with more
+number of distinct leaf nodes. Due to the presence of more
+intersection of variables between the two dilution/mixing
+subtrees, mapping of the mixing tree into a biochip layout
+increases the chance of cross-contaminations. This can be
+veriﬁed using the layout shown in Fig. 3. Thus, the BS
+method does not provide a mixing tree that can be easily
+mapped into a layout utilizing parallel mixers. While with
+the mixer assignment shown in Fig. 6(b), it is observed
+that RMA method can reduce chance of cross-contaminations
+compared to the BS method.
+For a target ratio, in which the components are almost
+equally distributed (for example 1 : 1 : 1), the RMA method
+provides a mixing tree having longer dilution/mixing sub-
+trees with less number of distinct leaf nodes. Thus, it can
+175
+
+M1
+M1
+M2
+M1
+M1
+M1
+M1
+M1
+M1
+M1
+M1
+M2
+M2
+M2
+M2
+M2
+M2
+M2
+(a) By BS method
+level=0
+level=1
+level=2
+level=3
+level=4
+level=5
+level=6
+level=7
+level=8
+level=10
+x3
+x2
+x1
+x2
+x1
+x2
+x2
+x1
+x1
+x1
+x1
+x3
+x3
+x3
+x3
+x1
+x1 x1
+x2
+(b) By RMA method
+level=9
+x3
+x3
+x3
+x2
+x1
+x3
+x2
+x1 x2
+x1 x2
+x1
+x1
+x3
+x2
+m=14
+p=2
+d=10
+m=18
+p=2
+d=10
+Figure 7: Mixing trees for the ratio 341 : 341 : 342 obtained
+by two methods.
+m=6
+p=1
+d=6
+(a) 25:24:1
+x2
+x3
+x2
+x2
+x2
+x2
+x1
+level=0
+level=1
+level=2
+level=3
+level=4
+level=5
+(b) 1:2:3:1:23
+x3
+x1
+x5
+x4
+x2
+x3
+x5
+x5
+m=7
+p=2
+d=5
+level=6
+Figure 8: Same mixing trees obtained by both the methods
+for two example target ratios.
+reduce the chance of cross-contaminations when the mixing
+tree is mapped into a biochip layout. However, the total
+number of mix/split cycles increases compared to the mixing
+tree as obtained by the BS method. Figure 7 depicts the
+mixing trees obtained by the two methods for the target
+ratio 1 : 1 : 1 ≈341 : 341 : 342. The mixer assignments to the
+nodes of the mixing tree are also shown in Fig. 7(b), from
+which it is easy to check the non-overlapping feature of the
+droplet pathways for the two mixers in the layout of Fig. 3.
+It may be observed that it is difﬁcult to map the mix/split
+steps of the mixing tree (Fig. 7(a)) obtained by the BS
+method to the mixers in the biochip layout. Hence, the RMA
+method generates a mixing tree that is likely to reduce cross-
+contamination during an automatic solution preparation.
+A target ratio, in which the components are highly skewed
+(for example 1 : 1 : 1 : 1000 or 25 : 24 : 1), two methods (BS
+and RMA) provide the same mixing tree. For example, the
+same mixing trees are obtained by both the methods for
+two such target ratios 25 : 24 : 1 (a ratio used in “One step
+miniprep method” [10]) and 1 : 2 : 3 : 1 : 23 (a ratio used in
+“Splinkerette PCR method” [10]) as shown in Fig. 8(a) and
+(b), respectively.
+V. CONCLUSION
+In this paper, we have proposed an algorithm for auto-
+matic solution preparation of several ﬂuids that can provide
+a mixing tree with longer dilution/mixing subtrees with
+fewer number of distinct leaf nodes. This reduces the droplet
+transportation time from different reservoirs located at the
+chip boundary to the on-chip mixers compared to the BS
+method. Moreover, this method reduces the chance of cross-
+contamination between droplet pathways of different ﬂuids,
+which in turn reduces the cost and energy spent for the
+management of wash droplets. However, the total number
+of mix-split operations and hence the cost for solution
+preparation may increase compared to the BS method. This
+follows from the fact that the BS method produces a mixing
+tree with a minimum number of leaf nodes for a given
+precision of the concentration factors.
+REFERENCES
+[1] K. Chakrabarty and T. Xu, Digital Microﬂuidic Biochips:
+Design and Optimization.
+CRC Press, 2010.
+[2] R. B. Fair, “Digital Microﬂuidics: Is a True Lab-on-a-Chip
+Possible?” Microﬂuid Nanoﬂuid, vol. 3, pp. 245–281, March
+2007.
+[3] K. Chakrabarty and J. Zeng, “Design Automation for
+Microﬂuidics-based Biochips,” ACM JETC, vol. 1, no. 3, pp.
+186–223, 2005.
+[4] R. B. Fair et al., “Integrated Chemical/Biochemical Sample
+Collection, Pre-Concentration, and Analysis on a Digital
+Microﬂuidic Lab-On-a-Chip Platform,” in Proc. of SPIE Conf.
+on Lab-on-a-Chip: Platforms, Devices, and Applications, vol.
+5591, October 2004, pp. 113–124.
+[5] M.
+G.
+Pollack,
+R.
+B.
+Fair,
+and
+A.
+D.
+Shenderov,
+“Electrowetting-based Actuation of Liquid Droplets for Mi-
+croﬂuidic Applications,” Applied Physics Letters, vol. 77, pp.
+1725–1726, 2000.
+[6] W. Thies, J. P. Urbanski, T. Thorsen, and S. Amarasinghe,
+“Abstraction Layers for Scalable Microﬂuidic Biocomputing,”
+Natural Computing, vol. 7, no. 2, pp. 255–275, May 2008.
+[7] T. Xu, V. K. Pamula, and K. Chakrabarty, “Automated,
+Accurate and Inexpensive Solution-Preparation on a Digital
+Microﬂuidic Biochip,” in Proc. of the IEEE BioCAS, Novem-
+ber 2008, pp. 301–304.
+[8] M. J. Jebrail and A. R. Wheeler, “Digital Microﬂuidic Method
+for Protein Extraction by Precipitation,” Journal of Analytical
+Chemistry, vol. 81, pp. 330–335, 2009.
+[9] OpenWetWare, http://openwetware.org/wiki/Protocols, Octo-
+ber 2009.
+[10] BioCoder: A Programming Language for Biology Protocols,
+Microsoft Research India, http://research.microsoft.com/en-
+us/um/india/projects/biocoder/, December 2009.
+[11] C.-Y. Lin and Y.-W. Chang, “Cross Contamination Aware
+Design Methodology for Pin-Constrained Digital Microﬂudic
+Biochips,” in Proc. of the DAC, June 2010.
+176
