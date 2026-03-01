@@ -49,7 +49,7 @@ function rmaPartition(P, L) {
         const maxSubsetSize = Math.floor(p2count / 2); // n1 <= count/2
         for (let mask = 1; mask < (1 << p2count) && !subsetFound; mask++) {
           const bits = mask.toString(2).split('').filter(b => b === '1').length;
-          if (bits > maxSubsetSize) continue;
+          if (bits * 2 > p2count) continue;
           let sum = 0;
           for (let j = 0; j < p2count; j++) if (mask & (1 << j)) sum += p2entries[j][1];
           if (sum === E) {
@@ -125,59 +125,127 @@ function buildBSTree(approx, names, d) {
   return root;
 }
 
-// ========== AP-DP v2: Multi-Strategy Adaptive Partitioning ==========
-// Improvements over v1:
-// 1. Enforces exact L/2 splits (required by 1:1 mixing model)
-// 2. Generates multiple candidate partitions and scores them
-// 3. Scores based on fluid separation (fewer shared fluids = longer dilution subtrees)
-// 4. Considers RMA-style dominant-fluid partitions as candidates
-// 5. Among equal-score candidates, prefers fewer distinct fluids per side
+// ========== AP-DP v3: Enhanced Multi-Strategy Adaptive Partitioning ==========
+// Key improvements over v2:
+// 1. Enumerates ALL subsets that sum to exactly half (not just one)
+// 2. Explores multiple base sums for split strategies
+// 3. Considers RMA-style partitions for multiple large fluids
+// 4. Enhanced scoring with dilution potential estimation
+// 5. Tries splitting from both sides (P1 and P2)
 
-function scorePartition(P1, P2) {
+function scorePartitionV3(P1, P2, L) {
   // Lower score = better partition
-  const k1 = new Set(Object.keys(P1).filter(k => P1[k] > 0));
-  const k2 = new Set(Object.keys(P2).filter(k => P2[k] > 0));
-  // Overlap: fluids appearing in BOTH sides (split fluids) — heavily penalised
-  let overlap = 0;
-  for (const k of k1) if (k2.has(k)) overlap++;
-  // Max distinct fluids on either side — fewer = better dilution chains
-  const maxDistinct = Math.max(k1.size, k2.size);
-  // Imbalance in fluid count (prefer similar count on both sides)
-  const countDiff = Math.abs(k1.size - k2.size);
-  return overlap * 100 + maxDistinct * 10 + countDiff;
+  const k1 = Object.keys(P1).filter(k => P1[k] > 0);
+  const k2 = Object.keys(P2).filter(k => P2[k] > 0);
+  const set1 = new Set(k1), set2 = new Set(k2);
+
+  // Count splits (fluids appearing in BOTH sides) — most important
+  let splits = 0;
+  for (const k of k1) if (set2.has(k)) splits++;
+
+  // Dilution potential: estimate how "pure" each side is
+  // A side with one dominant fluid (>50% of its volume) has high dilution potential
+  const half = L / 2;
+  const dom1 = k1.length > 0 ? Math.max(...k1.map(k => P1[k])) / half : 0;
+  const dom2 = k2.length > 0 ? Math.max(...k2.map(k => P2[k])) / half : 0;
+  const dilutionBonus = (dom1 > 0.5 ? 1 : 0) + (dom2 > 0.5 ? 1 : 0); // 0, 1, or 2
+
+  // Fewer distinct fluids = potentially longer dilution chains
+  const totalDistinct = k1.length + k2.length;
+
+  // Prefer partitions where one side has very few fluids (good for dilution)
+  const minFluids = Math.min(k1.length, k2.length);
+
+  // Score: splits are heavily penalized, dilution is rewarded
+  return splits * 1000 - dilutionBonus * 50 + totalDistinct * 10 + minFluids * 5;
 }
 
-function dpSubsetSum(items, target) {
-  // Returns { sum, subset: Set of indices }
+function enumerateSubsetsWithSum(items, target, maxSubsets = 20) {
+  // Enumerate ALL subsets that sum to exactly target (up to maxSubsets)
+  // Returns array of Sets of indices
   const n = items.length;
-  if (target <= 0) return { sum: 0, subset: new Set() };
-  // dp[w] = bitmask or index info; use prev-link reconstruction
-  const dp = new Int8Array(target + 1); // 0=unreachable, 1=reachable
-  const from = new Array(target + 1).fill(null); // { prevSum, idx }
-  dp[0] = 1;
-  for (let i = 0; i < n; i++) {
-    const v = items[i].v;
-    for (let s = target; s >= v; s--) {
-      if (dp[s - v] === 1 && dp[s] === 0) {
-        dp[s] = 1;
-        from[s] = { prev: s - v, idx: i };
+  const results = [];
+
+  if (n <= 20) {
+    // Brute force for small n
+    for (let mask = 1; mask < (1 << n) && results.length < maxSubsets; mask++) {
+      let sum = 0;
+      for (let i = 0; i < n; i++) if (mask & (1 << i)) sum += items[i].v;
+      if (sum === target) {
+        const subset = new Set();
+        for (let i = 0; i < n; i++) if (mask & (1 << i)) subset.add(i);
+        results.push(subset);
       }
     }
+  } else {
+    // DP with multiple path tracking for larger n
+    const dp = new Map(); // sum -> array of subsets (limited)
+    dp.set(0, [new Set()]);
+
+    for (let i = 0; i < n; i++) {
+      const v = items[i].v;
+      const newEntries = [];
+      for (const [sum, subsets] of dp.entries()) {
+        const newSum = sum + v;
+        if (newSum <= target) {
+          for (const subset of subsets) {
+            if (results.length >= maxSubsets && newSum !== target) continue;
+            const newSubset = new Set(subset);
+            newSubset.add(i);
+            newEntries.push([newSum, newSubset]);
+          }
+        }
+      }
+      for (const [sum, subset] of newEntries) {
+        if (sum === target) {
+          results.push(subset);
+          if (results.length >= maxSubsets) break;
+        } else {
+          if (!dp.has(sum)) dp.set(sum, []);
+          if (dp.get(sum).length < 3) dp.get(sum).push(subset); // limit stored per sum
+        }
+      }
+      if (results.length >= maxSubsets) break;
+    }
   }
-  // Find best sum ≤ target, closest to target
-  let best = 0;
-  for (let s = target; s >= 0; s--) { if (dp[s]) { best = s; break; } }
-  // Reconstruct
-  const subset = new Set();
-  let cur = best;
-  while (cur > 0 && from[cur]) { subset.add(from[cur].idx); cur = from[cur].prev; }
-  return { sum: best, subset };
+
+  return results;
+}
+
+function findClosestSums(items, target, count = 5) {
+  // Find the 'count' closest achievable sums to target (including exact if possible)
+  const n = items.length;
+  const achievable = new Set([0]);
+  const subsetFor = new Map(); // sum -> one subset achieving it
+  subsetFor.set(0, new Set());
+
+  for (let i = 0; i < n; i++) {
+    const v = items[i].v;
+    const toAdd = [];
+    for (const sum of achievable) {
+      const newSum = sum + v;
+      if (newSum <= target && !achievable.has(newSum)) {
+        toAdd.push(newSum);
+        const newSubset = new Set(subsetFor.get(sum));
+        newSubset.add(i);
+        subsetFor.set(newSum, newSubset);
+      }
+    }
+    for (const s of toAdd) achievable.add(s);
+  }
+
+  // Sort by closeness to target
+  const sorted = [...achievable].sort((a, b) => Math.abs(target - a) - Math.abs(target - b));
+  return sorted.slice(0, count).map(sum => ({ sum, subset: subsetFor.get(sum) }));
 }
 
 function buildAPDP(P, L, maxD, lv = 0) {
   const keys = Object.keys(P).filter(k => P[k] > 0);
   if (!keys.length) return null;
-  if (keys.length === 1) { const k = keys[0]; return { label: k, volume: P[k], level: lv, leaf: true, partition: { [k]: P[k] } }; }
+  if (keys.length === 1) {
+    const k = keys[0];
+    return { label: k, volume: P[k], level: lv, leaf: true, partition: { [k]: P[k] } };
+  }
   if (L <= 1 || lv >= maxD) {
     const s = Object.entries(P).sort((a, b) => b[1] - a[1]);
     return { label: s[0][0], volume: L, level: lv, leaf: true, partition: { ...P } };
@@ -186,84 +254,155 @@ function buildAPDP(P, L, maxD, lv = 0) {
   const half = L / 2;
   const items = keys.map(k => ({ k, v: P[k] }));
   const sorted = items.slice().sort((a, b) => b.v - a.v);
+  const n = items.length;
 
   // ===== Generate candidate partitions =====
   const candidates = [];
 
-  // --- Strategy A: DP whole-fluid partition (no splits) ---
-  const dpRes = dpSubsetSum(items, half);
-  if (dpRes.sum === half) {
-    // Perfect split with no fluid splitting!
+  // --- Strategy A: Enumerate ALL whole-fluid partitions summing to exactly half ---
+  const exactSubsets = enumerateSubsetsWithSum(items, half, 15);
+  for (const subset of exactSubsets) {
     const cP1 = {}, cP2 = {};
-    items.forEach((it, i) => { if (dpRes.subset.has(i)) cP1[it.k] = it.v; else cP2[it.k] = it.v; });
-    if (Object.keys(cP1).length > 0 && Object.keys(cP2).length > 0)
-      candidates.push({ P1: cP1, P2: cP2, type: "dp-whole" });
+    items.forEach((it, i) => {
+      if (subset.has(i)) cP1[it.k] = it.v;
+      else cP2[it.k] = it.v;
+    });
+    if (Object.keys(cP1).length > 0 && Object.keys(cP2).length > 0) {
+      candidates.push({ P1: cP1, P2: cP2, type: "exact-whole" });
+    }
   }
 
-  // --- Strategy B: DP + single split (try each split candidate) ---
-  if (dpRes.sum < half) {
-    const need = half - dpRes.sum;
-    // Base subset from DP
-    const baseP1 = {}, baseP2 = {};
-    items.forEach((it, i) => { if (dpRes.subset.has(i)) baseP1[it.k] = it.v; else baseP2[it.k] = it.v; });
-    // Try splitting each fluid in P2 that has enough volume
-    for (const fk of Object.keys(baseP2)) {
-      if (baseP2[fk] >= need) {
-        const cP1 = { ...baseP1 }, cP2 = { ...baseP2 };
-        cP1[fk] = (cP1[fk] || 0) + need;
-        cP2[fk] -= need;
-        if (cP2[fk] <= 0) delete cP2[fk];
-        if (Object.keys(cP1).length > 0 && Object.keys(cP2).length > 0)
-          candidates.push({ P1: cP1, P2: cP2, type: "dp-split" });
+  // --- Strategy B: DP closest sums + single split ---
+  if (exactSubsets.length === 0) {
+    const closestSums = findClosestSums(items, half, 5);
+    for (const { sum, subset } of closestSums) {
+      if (sum === half) continue; // already handled
+      const need = half - sum;
+      if (need <= 0) continue;
+
+      // Build base partition
+      const baseP1 = {}, baseP2 = {};
+      items.forEach((it, i) => {
+        if (subset.has(i)) baseP1[it.k] = it.v;
+        else baseP2[it.k] = it.v;
+      });
+
+      // Try splitting each fluid in P2 that has enough volume
+      for (const fk of Object.keys(baseP2)) {
+        if (baseP2[fk] >= need) {
+          const cP1 = { ...baseP1 }, cP2 = { ...baseP2 };
+          cP1[fk] = (cP1[fk] || 0) + need;
+          cP2[fk] -= need;
+          if (cP2[fk] <= 0) delete cP2[fk];
+          if (Object.keys(cP1).length > 0 && Object.keys(cP2).length > 0) {
+            candidates.push({ P1: cP1, P2: cP2, type: "dp-split" });
+          }
+        }
       }
     }
   }
 
-  // --- Strategy C: RMA-style dominant fluid ---
-  if (sorted[0].v >= half) {
-    const cP1 = { [sorted[0].k]: half }, cP2 = {};
-    const rem = sorted[0].v - half;
-    if (rem > 0) cP2[sorted[0].k] = rem;
-    for (let i = 1; i < sorted.length; i++) cP2[sorted[i].k] = sorted[i].v;
-    if (Object.keys(cP1).length > 0 && Object.keys(cP2).length > 0)
+  // --- Strategy C: RMA-style for ALL fluids that could dominate (>= half) ---
+  for (let i = 0; i < sorted.length && sorted[i].v >= half; i++) {
+    const dominant = sorted[i];
+    const cP1 = { [dominant.k]: half }, cP2 = {};
+    const rem = dominant.v - half;
+    if (rem > 0) cP2[dominant.k] = rem;
+    for (let j = 0; j < sorted.length; j++) {
+      if (j !== i) cP2[sorted[j].k] = sorted[j].v;
+    }
+    if (Object.keys(cP1).length > 0 && Object.keys(cP2).length > 0) {
       candidates.push({ P1: cP1, P2: cP2, type: "rma-style" });
+    }
   }
 
-  // --- Strategy D: Greedy balanced (alternate assignment, fallback) ---
+  // --- Strategy D: Greedy balanced with preference for large fluids ---
   {
     const cP1 = {}, cP2 = {};
     let s1 = 0, s2 = 0;
     for (const it of sorted) {
-      if (s1 <= s2 && s1 + it.v <= half) { cP1[it.k] = it.v; s1 += it.v; }
-      else if (s2 + it.v <= half) { cP2[it.k] = it.v; s2 += it.v; }
-      else if (s1 < half) {
+      if (s1 <= s2 && s1 + it.v <= half) {
+        cP1[it.k] = it.v; s1 += it.v;
+      } else if (s2 + it.v <= half) {
+        cP2[it.k] = it.v; s2 += it.v;
+      } else if (s1 < half) {
         const need = half - s1;
-        if (need > 0 && need <= it.v) { cP1[it.k] = need; const r = it.v - need; if (r > 0) cP2[it.k] = r; s1 = half; s2 += r; }
-        else { cP2[it.k] = it.v; s2 += it.v; }
-      } else { cP2[it.k] = it.v; s2 += it.v; }
+        if (need > 0 && need <= it.v) {
+          cP1[it.k] = need;
+          const r = it.v - need;
+          if (r > 0) cP2[it.k] = r;
+          s1 = half; s2 += r;
+        } else {
+          cP2[it.k] = it.v; s2 += it.v;
+        }
+      } else {
+        cP2[it.k] = it.v; s2 += it.v;
+      }
     }
-    if (Object.keys(cP1).length > 0 && Object.keys(cP2).length > 0)
+    if (Object.keys(cP1).length > 0 && Object.keys(cP2).length > 0) {
       candidates.push({ P1: cP1, P2: cP2, type: "greedy" });
+    }
   }
 
-  // ===== Score and pick best candidate =====
+  // --- Strategy E: Reverse greedy (fill P2 first) ---
+  {
+    const cP1 = {}, cP2 = {};
+    let s1 = 0, s2 = 0;
+    for (const it of sorted) {
+      if (s2 <= s1 && s2 + it.v <= half) {
+        cP2[it.k] = it.v; s2 += it.v;
+      } else if (s1 + it.v <= half) {
+        cP1[it.k] = it.v; s1 += it.v;
+      } else if (s2 < half) {
+        const need = half - s2;
+        if (need > 0 && need <= it.v) {
+          cP2[it.k] = need;
+          const r = it.v - need;
+          if (r > 0) cP1[it.k] = r;
+          s2 = half; s1 += r;
+        } else {
+          cP1[it.k] = it.v; s1 += it.v;
+        }
+      } else {
+        cP1[it.k] = it.v; s1 += it.v;
+      }
+    }
+    if (Object.keys(cP1).length > 0 && Object.keys(cP2).length > 0) {
+      candidates.push({ P1: cP1, P2: cP2, type: "greedy-rev" });
+    }
+  }
+
+  // ===== Validate and score candidates =====
   if (candidates.length === 0) {
-    // Absolute fallback
     const s = Object.entries(P).sort((a, b) => b[1] - a[1]);
     return { label: s[0][0], volume: L, level: lv, leaf: true, partition: { ...P } };
   }
 
-  // Validate: both sides must sum to half
+  // Filter to valid partitions (both sides sum to half)
   const validCands = candidates.filter(c => {
     const s1 = Object.values(c.P1).reduce((a, b) => a + b, 0);
     const s2 = Object.values(c.P2).reduce((a, b) => a + b, 0);
     return s1 === half && s2 === half;
   });
 
-  const pool = validCands.length > 0 ? validCands : candidates;
-  let bestCand = pool[0], bestScore = scorePartition(pool[0].P1, pool[0].P2);
+  // Remove duplicates based on partition content
+  const seen = new Set();
+  const uniqueCands = [];
+  for (const c of (validCands.length > 0 ? validCands : candidates)) {
+    const key = JSON.stringify([
+      Object.entries(c.P1).sort(),
+      Object.entries(c.P2).sort()
+    ]);
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueCands.push(c);
+    }
+  }
+
+  const pool = uniqueCands.length > 0 ? uniqueCands : candidates;
+  let bestCand = pool[0], bestScore = scorePartitionV3(pool[0].P1, pool[0].P2, L);
   for (let i = 1; i < pool.length; i++) {
-    const sc = scorePartition(pool[i].P1, pool[i].P2);
+    const sc = scorePartitionV3(pool[i].P1, pool[i].P2, L);
     if (sc < bestScore) { bestScore = sc; bestCand = pool[i]; }
   }
 
@@ -274,10 +413,13 @@ function buildAPDP(P, L, maxD, lv = 0) {
   };
 }
 
-// ========== LARP: Lookahead-Augmented Recursive Partitioning ==========
-// Novel algorithm: enumerates ALL valid DP partitions, scores each with
-// 1-level recursive lookahead to estimate downstream tree quality.
-// Unlike RMA/BS/APDP which are myopic, LARP looks ahead one level.
+// ========== LARP v2: Lookahead-Augmented Recursive Partitioning ==========
+// Enhanced version with:
+// - Comprehensive subset enumeration (no artificial cap)
+// - Parallel exploration of zero-split AND single-split candidates
+// - Multi-sum exploration for splits
+// - 2-level lookahead with dilution-aware scoring
+// - Multi-fluid RMA-style candidates
 
 function larpEnumPartitions(P, L) {
   const half = L / 2;
@@ -286,90 +428,183 @@ function larpEnumPartitions(P, L) {
   const n = items.length;
   if (n === 0) return [];
 
-  // DP to find all achievable sums using whole-fluid subsets
-  // dp[s] = list of bitmasks achieving sum s
+  const candidates = [];
+  const seen = new Set();
+
+  const addCandidate = (P1, P2, splits) => {
+    const k1 = Object.keys(P1).filter(k => P1[k] > 0);
+    const k2 = Object.keys(P2).filter(k => P2[k] > 0);
+    if (k1.length === 0 || k2.length === 0) return;
+    const s1 = k1.reduce((a, k) => a + P1[k], 0);
+    const s2 = k2.reduce((a, k) => a + P2[k], 0);
+    if (s1 !== half || s2 !== half) return;
+    const key = JSON.stringify([Object.entries(P1).sort(), Object.entries(P2).sort()]);
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push({ P1: { ...P1 }, P2: { ...P2 }, splits });
+  };
+
+  // ===== DP to enumerate ALL achievable sums with whole-fluid subsets =====
+  // dp[s] = list of bitmasks achieving sum s (higher cap for thorough enumeration)
+  const MASK_CAP = 64;
   const dp = new Array(half + 1).fill(null);
-  dp[0] = [0]; // empty subset achieves sum 0
+  dp[0] = [0];
   for (let i = 0; i < n; i++) {
     const v = items[i].v;
     for (let s = half; s >= v; s--) {
       if (dp[s - v]) {
         if (!dp[s]) dp[s] = [];
         for (const mask of dp[s - v]) {
-          if (dp[s].length < 8) dp[s].push(mask | (1 << i)); // cap stored masks
+          if (dp[s].length < MASK_CAP) dp[s].push(mask | (1 << i));
         }
       }
     }
   }
 
-  const candidates = [];
-
-  // Zero-split candidates: subsets summing exactly to half
+  // ===== Strategy 1: Zero-split candidates (subsets summing exactly to half) =====
   if (dp[half]) {
     for (const mask of dp[half]) {
       const P1 = {}, P2 = {};
-      items.forEach((it, i) => { if (mask & (1 << i)) P1[it.k] = it.v; else P2[it.k] = it.v; });
-      if (Object.keys(P1).length > 0 && Object.keys(P2).length > 0)
-        candidates.push({ P1, P2, splits: 0 });
+      items.forEach((it, i) => {
+        if (mask & (1 << i)) P1[it.k] = it.v;
+        else P2[it.k] = it.v;
+      });
+      addCandidate(P1, P2, 0);
     }
   }
 
-  // Single-split candidates: closest sum < half, split one fluid to fill gap
-  if (candidates.length === 0) {
-    // Find best achievable sum <= half
-    let bestSum = 0;
-    for (let s = half; s >= 0; s--) { if (dp[s]) { bestSum = s; break; } }
-    if (dp[bestSum]) {
-      const need = half - bestSum;
-      for (const mask of dp[bestSum]) {
-        // Try splitting each fluid NOT in the subset
-        for (let i = 0; i < n; i++) {
-          if (mask & (1 << i)) continue; // already in P1
-          if (items[i].v >= need) {
+  // ===== Strategy 2: Single-split candidates from MULTIPLE achievable sums =====
+  // Explore top 5 closest sums to half (not just the single closest)
+  const achievableSums = [];
+  for (let s = half - 1; s >= 0; s--) {
+    if (dp[s]) achievableSums.push(s);
+    if (achievableSums.length >= 5) break;
+  }
+
+  for (const baseSum of achievableSums) {
+    const need = half - baseSum;
+    if (need <= 0) continue;
+    for (const mask of dp[baseSum]) {
+      // Try splitting each fluid NOT in the subset (add `need` to P1)
+      for (let i = 0; i < n; i++) {
+        if (mask & (1 << i)) continue;
+        if (items[i].v >= need) {
+          const P1 = {}, P2 = {};
+          items.forEach((it, j) => {
+            if (mask & (1 << j)) P1[it.k] = it.v;
+            else P2[it.k] = it.v;
+          });
+          P1[items[i].k] = (P1[items[i].k] || 0) + need;
+          P2[items[i].k] = (P2[items[i].k] || 0) - need;
+          if (P2[items[i].k] <= 0) delete P2[items[i].k];
+          addCandidate(P1, P2, 1);
+        }
+      }
+      // Also try splitting a fluid that IS in the subset (move some back to P2)
+      for (let i = 0; i < n; i++) {
+        if (!(mask & (1 << i))) continue;
+        const excess = baseSum - (half - items[i].v);
+        if (excess > 0 && excess < items[i].v) {
+          const keep = items[i].v - excess;
+          if (keep > 0) {
             const P1 = {}, P2 = {};
             items.forEach((it, j) => {
-              if (mask & (1 << j)) P1[it.k] = it.v;
+              if (j === i) { P1[it.k] = keep; P2[it.k] = excess; }
+              else if (mask & (1 << j)) P1[it.k] = it.v;
               else P2[it.k] = it.v;
             });
-            P1[items[i].k] = (P1[items[i].k] || 0) + need;
-            P2[items[i].k] -= need;
-            if (P2[items[i].k] <= 0) delete P2[items[i].k];
-            if (Object.keys(P1).length > 0 && Object.keys(P2).length > 0)
-              candidates.push({ P1, P2, splits: 1 });
+            addCandidate(P1, P2, 1);
           }
         }
       }
     }
   }
 
-  // RMA-style fallback: dominant fluid fills one child
-  if (candidates.length === 0) {
-    const sorted = items.slice().sort((a, b) => b.v - a.v);
-    if (sorted[0].v >= half) {
-      const P1 = { [sorted[0].k]: half }, P2 = {};
-      const rem = sorted[0].v - half;
-      if (rem > 0) P2[sorted[0].k] = rem;
-      for (let i = 1; i < sorted.length; i++) P2[sorted[i].k] = sorted[i].v;
-      candidates.push({ P1, P2, splits: 1 });
+  // ===== Strategy 3: RMA-style for ALL fluids that could dominate (≥ half) =====
+  const sorted = items.slice().sort((a, b) => b.v - a.v);
+  for (let i = 0; i < sorted.length && sorted[i].v >= half; i++) {
+    const dominant = sorted[i];
+    const P1 = { [dominant.k]: half }, P2 = {};
+    const rem = dominant.v - half;
+    if (rem > 0) P2[dominant.k] = rem;
+    for (let j = 0; j < sorted.length; j++) {
+      if (j !== i) P2[sorted[j].k] = sorted[j].v;
     }
+    addCandidate(P1, P2, dominant.v > half ? 1 : 0);
+  }
+
+  // ===== Strategy 4: Double-split candidates (when single split isn't enough) =====
+  if (candidates.length === 0 || !candidates.some(c => c.splits <= 1)) {
+    // Try splitting two fluids
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        // Try allocating parts of items[i] and items[j] to reach half
+        for (let ai = 1; ai < items[i].v; ai++) {
+          const aj = half - ai;
+          if (aj > 0 && aj < items[j].v) {
+            const P1 = { [items[i].k]: ai, [items[j].k]: aj };
+            const P2 = { [items[i].k]: items[i].v - ai, [items[j].k]: items[j].v - aj };
+            for (let k = 0; k < n; k++) {
+              if (k !== i && k !== j) P2[items[k].k] = items[k].v;
+            }
+            addCandidate(P1, P2, 2);
+          }
+        }
+      }
+    }
+  }
+
+  // ===== Strategy 5: Greedy balanced fallback =====
+  if (candidates.length === 0) {
+    const cP1 = {}, cP2 = {};
+    let s1 = 0, s2 = 0;
+    for (const it of sorted) {
+      if (s1 <= s2 && s1 + it.v <= half) { cP1[it.k] = it.v; s1 += it.v; }
+      else if (s2 + it.v <= half) { cP2[it.k] = it.v; s2 += it.v; }
+      else {
+        const need1 = half - s1, need2 = half - s2;
+        if (need1 > 0 && need1 <= it.v) {
+          cP1[it.k] = need1; cP2[it.k] = it.v - need1; s1 = half; s2 += it.v - need1;
+        } else if (need2 > 0 && need2 <= it.v) {
+          cP2[it.k] = need2; cP1[it.k] = it.v - need2; s2 = half; s1 += it.v - need2;
+        } else { cP2[it.k] = it.v; s2 += it.v; }
+      }
+    }
+    const splits = Object.keys(cP1).filter(k => cP2[k] > 0).length;
+    addCandidate(cP1, cP2, splits);
   }
 
   return candidates;
 }
 
-function larpQuickScore(P, L) {
-  // Quick estimate of partition quality (lower = better)
-  // Returns the minimum split count achievable at this level
+// 2-level lookahead score estimation
+function larpDeepScore(P, L, depth = 2) {
   const keys = Object.keys(P).filter(k => P[k] > 0);
-  if (keys.length <= 1 || L <= 1) return 0;
+  if (keys.length <= 1 || L <= 1 || depth <= 0) return { splits: 0, fluids: keys.length, dilution: keys.length <= 2 ? 1 : 0 };
+
   const half = L / 2;
   const items = keys.map(k => ({ k, v: P[k] }));
-  // Quick DP: can we achieve sum = half with whole fluids?
+  const n = items.length;
+
+  // Quick DP for achievability
   const dp = new Uint8Array(half + 1);
   dp[0] = 1;
-  for (const it of items) { for (let s = half; s >= it.v; s--) if (dp[s - it.v]) dp[s] = 1; }
-  if (dp[half]) return 0; // zero-split possible
-  return 1; // at least one split needed
+  for (const it of items) {
+    for (let s = half; s >= it.v; s--) if (dp[s - it.v]) dp[s] = 1;
+  }
+
+  const zeroSplitPossible = dp[half] === 1;
+  const minSplits = zeroSplitPossible ? 0 : 1;
+
+  // Check if this could become a dilution subtree (≤2 fluids)
+  const isDilution = keys.length <= 2 ? 1 : 0;
+
+  // Estimate best dominant fluid fraction (for dilution potential)
+  let maxFrac = 0;
+  for (const it of items) maxFrac = Math.max(maxFrac, it.v / L);
+  const dilutionPotential = maxFrac >= 0.5 ? 1 : 0;
+
+  return { splits: minSplits, fluids: keys.length, dilution: isDilution, dilutionPot: dilutionPotential };
 }
 
 function larpScore(cand, L) {
@@ -377,16 +612,37 @@ function larpScore(cand, L) {
   const half = L / 2;
   const k1 = Object.keys(P1).filter(k => P1[k] > 0);
   const k2 = Object.keys(P2).filter(k => P2[k] > 0);
-  const minDistinct = Math.min(k1.length, k2.length);
 
-  // Immediate cost
-  const immCost = splits * 20 + minDistinct * 3;
+  // ===== Immediate costs =====
+  const splitPenalty = splits * 100; // Heavy penalty for splits
+  const fluidCount = k1.length + k2.length;
 
-  // 1-level lookahead: estimate cost of children's best partitions
-  const la1 = (k1.length > 1 && half > 1) ? larpQuickScore(P1, half) : 0;
-  const la2 = (k2.length > 1 && half > 1) ? larpQuickScore(P2, half) : 0;
+  // ===== Dilution bonus: reward partitions creating dilution subtrees =====
+  let dilutionBonus = 0;
+  if (k1.length <= 2) dilutionBonus -= 15; // P1 is/will be a dilution subtree
+  if (k2.length <= 2) dilutionBonus -= 15; // P2 is/will be a dilution subtree
+  if (k1.length === 1) dilutionBonus -= 10; // Pure fluid on one side
+  if (k2.length === 1) dilutionBonus -= 10;
 
-  return immCost + 8 * (la1 + la2);
+  // Check for dominant fluid in each partition (could create long dilution chains)
+  const sum1 = k1.reduce((a, k) => a + P1[k], 0);
+  const sum2 = k2.reduce((a, k) => a + P2[k], 0);
+  for (const k of k1) { if (P1[k] >= sum1 * 0.5) dilutionBonus -= 8; break; }
+  for (const k of k2) { if (P2[k] >= sum2 * 0.5) dilutionBonus -= 8; break; }
+
+  // ===== 2-level lookahead =====
+  const la1 = (k1.length > 1 && half > 1) ? larpDeepScore(P1, half, 2) : { splits: 0, fluids: 1, dilution: 1, dilutionPot: 0 };
+  const la2 = (k2.length > 1 && half > 1) ? larpDeepScore(P2, half, 2) : { splits: 0, fluids: 1, dilution: 1, dilutionPot: 0 };
+
+  const lookaheadSplits = 50 * (la1.splits + la2.splits);
+  const lookaheadDilution = -20 * (la1.dilution + la2.dilution + la1.dilutionPot + la2.dilutionPot);
+
+  // ===== Balance penalty: prefer more even fluid distribution for flexibility =====
+  const balance = Math.abs(k1.length - k2.length);
+  const balancePenalty = balance * 2;
+
+  // Lower score = better
+  return splitPenalty + fluidCount + dilutionBonus + lookaheadSplits + lookaheadDilution + balancePenalty;
 }
 
 function buildLARP(P, L, maxD, lv = 0) {
@@ -405,7 +661,7 @@ function buildLARP(P, L, maxD, lv = 0) {
     return { label: s[0][0], volume: L, level: lv, leaf: true, partition: { ...P } };
   }
 
-  // Score all candidates with lookahead
+  // Score all candidates with enhanced lookahead
   let bestCand = candidates[0], bestScore = larpScore(candidates[0], L);
   for (let i = 1; i < candidates.length; i++) {
     const sc = larpScore(candidates[i], L);
@@ -419,12 +675,70 @@ function buildLARP(P, L, maxD, lv = 0) {
   };
 }
 
-// ========== ILP-like exact DP (Split-penalized) ==========
-// For each node, choose allocations a_i in [0, v_i] so that sum(a_i) <= half,
-// minimizing number of partial-splits (0 < a_i < v_i). 
-// Among equal split counts prefer larger sum (closer to half).
+// ========== ILP v2: Pareto-Optimal Split-Minimizing DP ==========
+// Enhanced with:
+// - Pareto-optimal candidate tracking: (splits, distinctFluidsP1)
+// - All Pareto-optimal allocations enumerated, then scored
+// - Dilution-aware scoring: rewards ≤2 fluids per side
+// - Dominant fluid bonus: rewards isolating fluids ≥50% volume
+// - 1-level lookahead: estimates downstream split potential
+
+function ilpEstimateDownstream(partition, targetSum) {
+  const keys = Object.keys(partition).filter(k => partition[k] > 0);
+  if (keys.length <= 1 || targetSum <= 1) return { splits: 0, canZeroSplit: true };
+  const half = Math.floor(targetSum / 2);
+  const items = keys.map(k => ({ k, v: partition[k] }));
+
+  // Quick DP: can we reach exactly half with whole fluids?
+  const dp = new Uint8Array(half + 1);
+  dp[0] = 1;
+  for (const it of items) {
+    for (let s = half; s >= it.v; s--) if (dp[s - it.v]) dp[s] = 1;
+  }
+  if (dp[half]) return { splits: 0, canZeroSplit: true };
+  return { splits: 1, canZeroSplit: false };
+}
+
+function ilpScoreAllocation(P1, P2, half) {
+  const k1 = Object.keys(P1).filter(k => P1[k] > 0);
+  const k2 = Object.keys(P2).filter(k => P2[k] > 0);
+  const n1 = k1.length, n2 = k2.length;
+
+  // Count actual splits (fluids appearing in both)
+  const splits = k1.filter(k => P2[k] > 0).length;
+
+  let score = splits * 1000; // Primary: minimize splits
+
+  // Secondary: minimize total distinct fluids (enables dilution)
+  score += (n1 + n2) * 10;
+
+  // Tertiary: reward dilution subtrees (≤2 fluids per side)
+  if (n1 <= 2) score -= 50;
+  if (n2 <= 2) score -= 50;
+  if (n1 === 1) score -= 30; // Pure fluid isolation
+  if (n2 === 1) score -= 30;
+
+  // Quaternary: reward dominant fluid isolation (≥50% of its side)
+  const s1 = k1.reduce((a, k) => a + P1[k], 0);
+  const s2 = k2.reduce((a, k) => a + P2[k], 0);
+  for (const k of k1) { if (P1[k] >= s1 * 0.5) { score -= 20; break; } }
+  for (const k of k2) { if (P2[k] >= s2 * 0.5) { score -= 20; break; } }
+
+  // 1-level lookahead: estimate downstream splits
+  const la1 = (n1 > 1 && half > 1) ? ilpEstimateDownstream(P1, half) : { splits: 0 };
+  const la2 = (n2 > 1 && half > 1) ? ilpEstimateDownstream(P2, half) : { splits: 0 };
+  score += (la1.splits + la2.splits) * 100;
+
+  // Bonus for zero-split potential downstream
+  if (la1.canZeroSplit) score -= 15;
+  if (la2.canZeroSplit) score -= 15;
+
+  return score;
+}
+
 function buildILP(P, L, maxD, lv = 0) {
   const keys = Object.keys(P).filter(k => P[k] > 0);
+  if (keys.length === 0) return null;
   if (keys.length === 1 || lv >= maxD) {
     const k = keys[0];
     return { label: k, volume: P[k], level: lv, leaf: true, partition: { [k]: P[k] } };
@@ -434,77 +748,155 @@ function buildILP(P, L, maxD, lv = 0) {
   const items = keys.map(k => ({ k, v: P[k] }));
   const n = items.length;
 
-  // dp[i][s] = minimum splits using first i items to make sum s
+  // ===== Phase 1: DP to find all Pareto-optimal allocations =====
+  // State: (item index, sum) -> list of Pareto-optimal (splits, allocation) pairs
+  // Pareto: (s1, a1) dominates (s2, a2) if s1 <= s2 AND a1 is "better" on secondary
+
   const INF = 1e9;
-  const dp = Array.from({ length: n + 1 }, () => new Int32Array(half + 1).fill(INF));
-  const take = Array.from({ length: n + 1 }, () => new Int32Array(half + 1).fill(-1));
-  const prev = Array.from({ length: n + 1 }, () => new Int32Array(half + 1).fill(-1));
-  dp[0][0] = 0;
+  const ALLOC_CAP = 32; // Cap allocations per state to limit memory
+
+  // dp[s] = list of {splits, alloc: array of take values}
+  let dp = new Array(half + 1).fill(null);
+  dp[0] = [{ splits: 0, alloc: [] }];
 
   for (let i = 0; i < n; i++) {
     const v = items[i].v;
+    const newDp = new Array(half + 1).fill(null);
+
     for (let s = 0; s <= half; s++) {
-      if (dp[i][s] === INF) continue;
-      // choose t units from current item into left partition: t in [0..v]
-      for (let t = 0; t <= v; t++) {
-        const ns = s + t;
-        if (ns > half) break;
-        const addSplit = (t > 0 && t < v) ? 1 : 0;
-        const cost = dp[i][s] + addSplit;
-        if (cost < dp[i + 1][ns]) {
-          dp[i + 1][ns] = cost;
-          take[i + 1][ns] = t;
-          prev[i + 1][ns] = s;
+      if (!dp[s]) continue;
+
+      for (const state of dp[s]) {
+        // Try all possible takes for item i
+        for (let t = 0; t <= v && s + t <= half; t++) {
+          const ns = s + t;
+          const addSplit = (t > 0 && t < v) ? 1 : 0;
+          const newSplits = state.splits + addSplit;
+          const newAlloc = [...state.alloc, t];
+
+          if (!newDp[ns]) newDp[ns] = [];
+
+          // Check if dominated by existing or dominates existing
+          let dominated = false;
+          const dominated_indices = [];
+
+          for (let j = 0; j < newDp[ns].length; j++) {
+            const existing = newDp[ns][j];
+            if (existing.splits <= newSplits) {
+              // Could be dominated - check if strictly better on splits
+              if (existing.splits < newSplits) { dominated = true; break; }
+              // Equal splits - keep both for now (will score later)
+            }
+            if (newSplits < existing.splits) {
+              dominated_indices.push(j);
+            }
+          }
+
+          if (!dominated) {
+            // Remove dominated entries
+            for (let j = dominated_indices.length - 1; j >= 0; j--) {
+              newDp[ns].splice(dominated_indices[j], 1);
+            }
+            // Add new entry if under cap
+            if (newDp[ns].length < ALLOC_CAP) {
+              newDp[ns].push({ splits: newSplits, alloc: newAlloc });
+            }
+          }
         }
+      }
+    }
+
+    dp = newDp;
+  }
+
+  // ===== Phase 2: Collect all candidates reaching exactly half =====
+  const candidates = [];
+
+  if (dp[half]) {
+    for (const state of dp[half]) {
+      const P1 = {}, P2 = {};
+      for (let i = 0; i < n; i++) {
+        const t = state.alloc[i];
+        if (t > 0) P1[items[i].k] = t;
+        if (items[i].v - t > 0) P2[items[i].k] = items[i].v - t;
+      }
+      const k1 = Object.keys(P1).filter(k => P1[k] > 0);
+      const k2 = Object.keys(P2).filter(k => P2[k] > 0);
+      if (k1.length > 0 && k2.length > 0) {
+        candidates.push({ P1, P2, splits: state.splits });
       }
     }
   }
 
-  // We MUST reach exactly 'half' to ensure equal volume mixing at this node
-  let bestS = half;
-  let bestSplits = dp[n][half];
+  // ===== Phase 3: RMA-style candidates (dominant fluid fills one child) =====
+  const sorted = items.slice().sort((a, b) => b.v - a.v);
+  for (let i = 0; i < sorted.length && sorted[i].v >= half; i++) {
+    const dominant = sorted[i];
+    const P1 = { [dominant.k]: half }, P2 = {};
+    const rem = dominant.v - half;
+    if (rem > 0) P2[dominant.k] = rem;
+    for (let j = 0; j < sorted.length; j++) {
+      if (sorted[j].k !== dominant.k) P2[sorted[j].k] = sorted[j].v;
+    }
+    const k1 = Object.keys(P1).filter(k => P1[k] > 0);
+    const k2 = Object.keys(P2).filter(k => P2[k] > 0);
+    if (k1.length > 0 && k2.length > 0) {
+      const splits = dominant.v > half ? 1 : 0;
+      candidates.push({ P1, P2, splits });
+    }
+  }
 
-  if (bestSplits === INF) {
-    // fallback: greedy split
-    const sorted = items.slice().sort((a, b) => b.v - a.v);
+  // ===== Phase 4: Greedy fallback if no candidates =====
+  if (candidates.length === 0) {
     let P1 = {}, P2 = {}, cur = 0;
     for (const it of sorted) {
       if (cur + it.v <= half) { P1[it.k] = it.v; cur += it.v; }
-      else { const need = half - cur; if (need > 0) { P1[it.k] = need; P2[it.k] = it.v - need; cur += need; } else P2[it.k] = it.v; }
+      else {
+        const need = half - cur;
+        if (need > 0) { P1[it.k] = need; P2[it.k] = it.v - need; cur += need; }
+        else P2[it.k] = it.v;
+      }
     }
-    return { label: "Mix", partition: P, volume: L, level: lv, leaf: false, left: buildILP(P1, half, maxD, lv + 1), right: buildILP(P2, half, maxD, lv + 1) };
+    const k1 = Object.keys(P1).filter(k => P1[k] > 0);
+    const k2 = Object.keys(P2).filter(k => P2[k] > 0);
+    if (k1.length > 0 && k2.length > 0) {
+      const splits = k1.filter(k => P2[k] > 0).length;
+      candidates.push({ P1, P2, splits });
+    }
   }
 
-  // reconstruct allocation
-  const allocation = {};
-  let curS = bestS;
-  for (let i = n; i >= 1; i--) {
-    const t = take[i][curS];
-    const prevS = prev[i][curS];
-    allocation[items[i - 1].k] = t;
-    curS = prevS;
+  if (candidates.length === 0) {
+    // Ultimate fallback
+    return { label: sorted[0].k, volume: L, level: lv, leaf: true, partition: P };
   }
 
-  // build partitions
-  const P1 = {}, P2 = {};
-  for (const it of items) {
-    const t = allocation[it.k] || 0;
-    if (t > 0) P1[it.k] = t;
-    if (it.v - t > 0) P2[it.k] = it.v - t;
+  // ===== Phase 5: Deduplicate candidates =====
+  const seen = new Set();
+  const uniqueCands = [];
+  for (const c of candidates) {
+    const key = JSON.stringify([Object.entries(c.P1).sort(), Object.entries(c.P2).sort()]);
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueCands.push(c);
+    }
   }
 
-  const sum = o => Object.values(o).reduce((a, b) => a + b, 0);
-  const sP1 = sum(P1), sP2 = sum(P2);
-  if (sP1 === 0 || sP2 === 0) {
-    // fallback to single-leaf
-    const sorted = Object.entries(P).sort((a, b) => b[1] - a[1]);
-    return { label: sorted[0][0], volume: L, level: lv, leaf: true, partition: P };
+  // ===== Phase 6: Score and select best candidate =====
+  let bestCand = uniqueCands[0];
+  let bestScore = ilpScoreAllocation(uniqueCands[0].P1, uniqueCands[0].P2, half);
+
+  for (let i = 1; i < uniqueCands.length; i++) {
+    const score = ilpScoreAllocation(uniqueCands[i].P1, uniqueCands[i].P2, half);
+    if (score < bestScore) {
+      bestScore = score;
+      bestCand = uniqueCands[i];
+    }
   }
 
   return {
     label: "Mix", partition: { ...P }, volume: L, level: lv, leaf: false,
-    left: buildILP(P1, half, maxD, lv + 1),
-    right: buildILP(P2, half, maxD, lv + 1)
+    left: buildILP(bestCand.P1, half, maxD, lv + 1),
+    right: buildILP(bestCand.P2, half, maxD, lv + 1)
   };
 }
 
@@ -522,9 +914,21 @@ function tD(n) { if (!n) return 0; return 1 + Math.max(tD(n.left), tD(n.right));
 function cntL(n) { if (!n) return 0; if (n.leaf) return 1; return cntL(n.left) + cntL(n.right); }
 function cntM(n) { if (!n || n.leaf) return 0; return 1 + cntM(n.left) + cntM(n.right); }
 function mxP(n) { if (!n) return 0; const lv = {}; (function w(nd) { if (!nd) return; if (!nd.leaf) lv[nd.level] = (lv[nd.level] || 0) + 1; w(nd.left); w(nd.right); })(n); return Math.max(0, ...Object.values(lv)); }
+// Dilution length: sum of depths of all dilution subtrees (subtrees with ≤2 distinct fluids per paper definition)
 function dL(n) {
   function df(nd) { if (!nd) return new Set(); if (nd.leaf) return new Set([nd.label]); return new Set([...df(nd.left), ...df(nd.right)]); }
-  let t = 0; (function w(nd) { if (!nd || nd.leaf) return; if (df(nd).size <= 3) { t += tD(nd) - 1; return; } w(nd.left); w(nd.right); })(n); return t;
+  let t = 0; (function w(nd) { if (!nd || nd.leaf) return; if (df(nd).size <= 2) { t += tD(nd) - 1; return; } w(nd.left); w(nd.right); })(n); return t;
+}
+// Longest single dilution subtree depth (≤2 distinct fluids)
+function maxDL(n) {
+  function df(nd) { if (!nd) return new Set(); if (nd.leaf) return new Set([nd.label]); return new Set([...df(nd.left), ...df(nd.right)]); }
+  let mx = 0;
+  (function w(nd) {
+    if (!nd || nd.leaf) return;
+    if (df(nd).size <= 2) { mx = Math.max(mx, tD(nd) - 1); return; }
+    w(nd.left); w(nd.right);
+  })(n);
+  return mx;
 }
 function cntSplits(n) {
   if (!n || n.leaf) return 0; let s = 0;
@@ -592,7 +996,7 @@ function Stat({ label, value, color, best }) {
 
 function getStats(root) {
   if (!root) return null;
-  return { m: cntM(root), d: tD(root) - 1, p: mxP(root), leaves: cntL(root), l: dL(root), splits: cntSplits(root) };
+  return { m: cntM(root), d: tD(root) - 1, p: mxP(root), leaves: cntL(root), l: dL(root), maxL: maxDL(root), splits: cntSplits(root) };
 }
 function buildTree(algo, adj, fl, depth) {
   if (algo === "bs") return buildBSTree(adj, fl, depth);
@@ -626,6 +1030,7 @@ function AlgoPage({ raw, setRaw, depth, setDepth, algo, title, icon, color, desc
           <Stat label="p (‖)" value={stats.p} color="#3b82f6" />
           <Stat label="leaves" value={stats.leaves} color="#10b981" />
           <Stat label="l (dilution)" value={stats.l} color="#ec4899" />
+          <Stat label="maxL" value={stats.maxL} color="#8b5cf6" />
           <Stat label="splits" value={stats.splits} color="#94a3b8" />
         </div>}
       </div>
@@ -647,14 +1052,17 @@ function ComparePage({ raw, setRaw, depth, setDepth }) {
     setData(res);
   };
   useEffect(gen, []);
-  const metrics = ["m", "d", "p", "leaves", "l", "splits"];
-  const mL = { m: "m (Mix/Split Cycles)", d: "d (Tree Depth)", p: "p (Parallelism)", leaves: "Leaf Nodes", l: "l (Dilution Len)", splits: "Fluid Splits" };
-  const mC = { m: "#ec4899", d: "#f59e0b", p: "#3b82f6", leaves: "#10b981", l: "#8b5cf6", splits: "#94a3b8" };
-  const lB = new Set(["m", "d", "leaves", "splits"]); // lower is better
-  const hB = new Set(["l"]); // higher is better
+  const metrics = ["m", "leaves", "l", "maxL", "splits", "d", "p"];
+  const mL = { m: "m (Mix/Split Cycles)", d: "d (Tree Depth)", p: "p (Parallelism)", leaves: "Leaf Nodes", l: "l (Dilution Sum)", maxL: "maxL (Longest Dilution)", splits: "Fluid Splits" };
+  const mC = { m: "#ec4899", d: "#f59e0b", p: "#3b82f6", leaves: "#10b981", l: "#8b5cf6", maxL: "#a855f7", splits: "#94a3b8" };
+  const lB = new Set(["m", "leaves", "splits"]); // lower is better (definitive)
+  const hB = new Set(["l", "maxL"]); // higher is better (definitive)
+  const varies = new Set(["d", "p"]); // depends on chip constraints
 
   function winner(m) {
-    if (!data) return ""; const vals = algos.map(a => data[a]?.[m] ?? (lB.has(m) ? Infinity : -Infinity));
+    if (!data) return "";
+    if (varies.has(m)) return "varies";
+    const vals = algos.map(a => data[a]?.[m] ?? (lB.has(m) ? Infinity : -Infinity));
     const best = lB.has(m) ? Math.min(...vals) : hB.has(m) ? Math.max(...vals) : Math.min(...vals);
     const ws = algos.filter((a, i) => vals[i] === best);
     return ws.length === algos.length ? "Tie" : ws.map(a => aL[a]).join(", ");
@@ -664,7 +1072,7 @@ function ComparePage({ raw, setRaw, depth, setDepth }) {
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "auto" }}>
       <div style={{ padding: "9px 12px", background: "#1e293b", borderRadius: 8, marginBottom: 8, flexShrink: 0 }}>
         <h2 style={{ margin: "0 0 2px", fontSize: 13, fontWeight: 800, color: "#10b981" }}>📊 Five-Way Comparison</h2>
-        <p style={{ margin: "0 0 6px", fontSize: 10, color: "#94a3b8" }}>RMA vs BS vs AP-DP vs LARP vs ILP. Lower m/d/leaves/splits = better.</p>
+        <p style={{ margin: "0 0 6px", fontSize: 10, color: "#94a3b8" }}>RMA vs BS vs AP-DP vs LARP vs ILP. Lower m/leaves/splits better. Higher l/maxL better. d/p depend on chip.</p>
         <InputPanel raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} onGen={gen} />
         <Legend allFluids={allF} adj={adj} />
       </div>
@@ -693,20 +1101,21 @@ function ComparePage({ raw, setRaw, depth, setDepth }) {
             </tr></thead>
             <tbody>{metrics.map(m => {
               const w = winner(m);
-              const wc = w === "Tie" ? "#64748b" : w.includes("ILP") ? "#84cc16" : w.includes("LARP") ? "#ef4444" : w.includes("AP-DP") ? "#06b6d4" : w.includes("RMA") ? "#6366f1" : "#f59e0b";
+              const wc = w === "Tie" ? "#64748b" : w === "varies" ? "#94a3b8" : w.includes("ILP") ? "#84cc16" : w.includes("LARP") ? "#ef4444" : w.includes("AP-DP") ? "#06b6d4" : w.includes("RMA") ? "#6366f1" : "#f59e0b";
               return <tr key={m} style={{ borderBottom: "1px solid #1a2332" }}>
                 <td style={{ padding: "3px 5px", color: "#cbd5e1" }}>{mL[m]}</td>
                 {algos.map(a => <td key={a} style={{ textAlign: "center", padding: "3px 5px", fontWeight: 700 }}>{data[a]?.[m] ?? "—"}</td>)}
-                <td style={{ textAlign: "center", padding: "3px 5px", fontWeight: 800, color: wc }}>{w === "Tie" ? "—" : `✓ ${w}`}</td>
+                <td style={{ textAlign: "center", padding: "3px 5px", fontWeight: 800, color: wc }}>{w === "Tie" ? "—" : w === "varies" ? "varies" : `✓ ${w}`}</td>
               </tr>;
             })}</tbody>
           </table>
           <div style={{ marginTop: 6, fontSize: 9, color: "#64748b", lineHeight: 1.5 }}>
-            <b style={{ color: "#84cc16" }}>ILP</b>: Split-penalized Exact DP — rigorously minimizes fluid splits at each level independently.<br />
-            <b style={{ color: "#ef4444" }}>LARP</b>: Lookahead DP — enumerates ALL partitions, scores with 1-level recursive lookahead.<br />
-            <b style={{ color: "#06b6d4" }}>AP-DP v2</b>: Multi-strategy optimizer — generates DP whole-fluid, DP+split, RMA-style & greedy candidates.<br />
-            <b style={{ color: "#6366f1" }}>RMA</b>: Maximises dilution subtree length l for layout mapping.<br />
-            <b style={{ color: "#f59e0b" }}>BS</b>: Bit-scanning bottom-up, minimises leaf count.
+            <b style={{ color: "#84cc16" }}>ILP v2</b>: Pareto-optimal DP — enumerates Pareto-optimal (splits, fluids) allocations, dilution-aware scoring with 1-level lookahead.<br />
+            <b style={{ color: "#ef4444" }}>LARP v2</b>: 2-level lookahead DP — comprehensive enumeration (zero/single/double splits), dilution-aware scoring.<br />
+            <b style={{ color: "#06b6d4" }}>AP-DP v3</b>: Multi-strategy optimizer — DP whole-fluid, DP+split, RMA-style (all dominants) & greedy candidates with dilution-aware scoring.<br />
+            <b style={{ color: "#6366f1" }}>RMA</b>: Maximises dilution subtree length l for layout mapping (per paper Algorithm 4).<br />
+            <b style={{ color: "#f59e0b" }}>BS</b>: Bit-scanning bottom-up, minimises leaf count.<br />
+            <span style={{ color: "#8b5cf6" }}>l</span>=sum of dilution subtree depths (≤2 fluids), <span style={{ color: "#a855f7" }}>maxL</span>=longest single dilution subtree.
           </div>
         </div>
       </>}
@@ -747,9 +1156,9 @@ export default function App() {
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", padding: 8 }}>
         {page === "rma" && <AlgoPage raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} algo="rma" title="RMA — Ratioed Mixing" icon="⚗️" color="#6366f1" desc="Largest fluid fills one child → long dilution chains. Best for layout mapping & cross-contamination." />}
         {page === "bs" && <AlgoPage raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} algo="bs" title="BS — Bit-Scanning [Thies]" icon="🔬" color="#f59e0b" desc="Bottom-up bit scanning. Minimises leaf count (fewest dispensing steps)." />}
-        {page === "apdp" && <AlgoPage raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} algo="apdp" title="AP-DP v2 — Multi-Strategy Adaptive" icon="⚙️" color="#06b6d4" desc="DP subset-sum + RMA-style + greedy candidates scored on fluid separation. Balances mix count, dilution length, and fluid splits." />}
-        {page === "larp" && <AlgoPage raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} algo="larp" title="LARP — Lookahead-Augmented Recursive Partitioning" icon="🔮" color="#ef4444" desc="Novel: enumerates ALL valid DP partitions, scores each with 1-level recursive lookahead to estimate downstream tree quality. Minimizes fluid splits while maintaining dilution subtrees." />}
-        {page === "ilp" && <AlgoPage raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} algo="ilp" title="ILP — Split-Penalized Exact DP" icon="🧮" color="#84cc16" desc="Uses a dynamic programming knapsack approach to find the exact allocation of fluids to sides that strictly minimizes the number of split components." />}
+        {page === "apdp" && <AlgoPage raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} algo="apdp" title="AP-DP v3 — Multi-Strategy Adaptive" icon="⚙️" color="#06b6d4" desc="DP subset-sum (all exact subsets) + DP+split (multiple sums) + RMA-style (all dominants) + greedy candidates with dilution-aware scoring." />}
+        {page === "larp" && <AlgoPage raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} algo="larp" title="LARP v2 — 2-Level Lookahead DP" icon="🔮" color="#ef4444" desc="Comprehensive enumeration: zero-split, single-split (multiple sums, both directions), double-split, RMA-style (all dominants). 2-level lookahead with dilution-aware scoring. No artificial caps." />}
+        {page === "ilp" && <AlgoPage raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} algo="ilp" title="ILP v2 — Pareto-Optimal DP" icon="🧮" color="#84cc16" desc="Pareto-optimal candidate enumeration (splits, distinctFluids). Dilution-aware scoring rewards ≤2 fluids per side. 1-level lookahead estimates downstream splits. RMA-style fallback for dominant fluids." />}
         {page === "compare" && <ComparePage raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} />}
       </div>
     </div>
