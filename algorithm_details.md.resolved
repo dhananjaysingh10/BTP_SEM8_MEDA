@@ -1,0 +1,71 @@
+# Advanced Mixing Tree Algorithms Documentation
+
+This document provides a detailed breakdown of the three advanced algorithmic strategies developed for generating biochip mixing trees: **AP-DP v3**, **LARP v2**, and **ILP v2**.
+
+All three algorithms exist to solve a fundamental problem in biochip fluidics: how to accurately mix $N$ distinct fluids (with varying target volume ratios) into a single target mixture by performing hierarchical $1:1$ mixes (which always dilute by exactly half). 
+
+To minimize cross-contamination and dispensing time on a biochip, a mixing algorithm must balance two competing goals:
+1. **Minimizing Mixes and Leaves (Node Count):** Achieved by aggressively combining fluids to reduce the total size of the operations tree tree.
+2. **Minimizing Fluid Splits & Maximizing Dilution Lengths (Structural Integrity):** Achieved by keeping fluids pure and delaying their combination until the last possible moment, which creates long, clean "serial dilution" chains (subtrees involving $\le 2$ fluids) that are easy to route on a chip.
+
+---
+
+## ⚙️ 1. AP-DP v3: Multi-Strategy Adaptive Partitioning
+
+AP-DP (Adaptive Partitioning - Dynamic Programming) operates as a highly optimized heuristic search at each node of the tree. Instead of relying on a single rule, it generates a pool of candidate partitions using multiple distinct mathematical strategies, and then selects the "best" one based on a custom scoring function.
+
+### Candidate Generation Strategies
+To split a target volume $L$ perfectly into two halves ($L/2$), AP-DP v3 explores:
+1. **Strategy A (DP Exact Whole-fluid):** Uses Dynamic Programming (DP) to find *all* possible subsets of complete (un-split) fluids that perfectly add up to $L/2$.
+2. **Strategy B (DP Close + Single Split):** Uses DP to find the top 5 sums closest to (but less than) $L/2$, and attempts to cut a single piece off a remaining fluid to perfectly bridge the gap.
+3. **Strategy C (RMA-style Dominant):** Evaluates treating any large fluid (volume $\ge L/2$) as the core of one side of the tree, filling the remaining space greedily (mimicking the RMA algorithm).
+4. **Strategy D & E (Forward and Reverse Greedy):** A fast fallback that sorts fluids by size and alternately stuffs them into the left or right side until one is full.
+
+### Scoring Mechanism ([scorePartitionV3](file:///c:/Users/Dhananjay%20Singh/Desktop/BTP_SEM8_MEDA/benchmark.js#136-162))
+Once it has a list of candidate $(P_1, P_2)$ valid splits, AP-DP selects the best one.
+* **Heavy Penalty for Splits:** It heavily punishes any partition where a fluid exists in both $P_1$ and $P_2$, because splitting a fluid doubles the dispensing complexity for that fluid.
+* **Dilution & Isolation Bonus:** It rewards partitions where one side is heavily dominated by a single fluid ($>50\%$ of its volume).
+* **Fewer Distinct Fluids:** It slightly rewards minimizing the sheer number of distinct fluids present on a given side, as fewer fluids mean fewer distinct routing paths.
+
+---
+
+## 🔮 2. LARP v2: Lookahead-Augmented Recursive Partitioning
+
+LARP is a novel approach that borrows the candidate-generation idea of AP-DP but massively supercharges it with **Lookahead Evaluation**. While AP-DP is "myopic" (it only scores the immediate $L/2$ split happening *right now*), LARP scores partitions based on what will happen *in the future* (downstream in the tree).
+
+### Uncapped Candidate Enumeration
+Unlike APDP which relies on heuristic strategies, LARP attempts exhaustive enumeration using a robust sum-subset mechanism:
+1. Enumerates **all** Whole-fluid zero-split partitions.
+2. Explores **all** Single-split candidates derived from multiple achievable sub-sums.
+3. Evaluates **Double-splits** (cutting two fluids) if no cleaner partition exists.
+4. Includes the RMA-style dominant fluid partitions.
+
+### The Power of the Lookahead Score ([larpScore](file:///c:/Users/Dhananjay%20Singh/Desktop/BTP_SEM8_MEDA/benchmark.js#610-647) & [larpDeepScore](file:///c:/Users/Dhananjay%20Singh/Desktop/BTP_SEM8_MEDA/benchmark.js#580-609))
+LARP's scoring function evaluates both the immediate cost and a recursive 2-level deep projection:
+* **Immediate Cost:** Penalizes physical fluid splits and the total fluid count. Rewards partitions that instantly spawn a dilution subtree (a side containing $\le 2$ fluids).
+* **2-Level Rapid DP Lookahead:** LARP runs a fast, lightweight DP simulation 2 levels deep into both $P_1$ and $P_2$. 
+  * Will the children of $P_1$ require a fluid split to achieve their own $L/4$ targets? **(Penalty if yes, Bonus if no).**
+  * Will the children of $P_1$ result in pure dilution subtrees? **(Bonus if yes).**
+* **The Result:** LARP avoids seemingly "good" immediate splits that would secretly force terrible unresolvable splits down the line. It serves as the "Goldilocks" algorithm—structurally beautiful like RMA, but highly optimized for size.
+
+---
+
+## 🧮 3. ILP v2: Pareto-Optimal Split-Minimizing DP
+
+While LARP and AP-DP use various smart heuristic generations, ILP (Integer Linear Programming conceptually) relies on an exact DP knapsack algorithm to rigorously find the absolute mathematical minimum number of fluid splits possible at every single node. 
+
+### Pareto-Optimal DP Allocation (Phase 1)
+To handle the explosive complexity of dividing fluids dynamically, ILP tracks a Pareto-optimal frontier. For any given sum $S$ progressing toward $L/2$, the DP state evaluates adding a volume $t$ of the current fluid. 
+
+The DP stores pairs of [(splits, allocation)](file:///c:/Users/Dhananjay%20Singh/Desktop/BTP_SEM8_MEDA/benchmark.js#919-920) and discards (dominates) any state that has equal or worse splits without providing a strictly better configuration. This rigorously constructs allocations that hit exactly $L/2$ while absolutely minimizing the times any fluid is partially chopped.
+
+### Tiered Evaluative Scoring ([ilpScoreAllocation](file:///c:/Users/Dhananjay%20Singh/Desktop/BTP_SEM8_MEDA/benchmark.js#702-738))
+Once the exact, split-minimized candidates are fetched, ILP breaks ties using a rigorous hierarchy:
+1. **Primary Aim:** Absolute lowest number of actual overlapping splits.
+2. **Secondary Aim:** Minimize total distinct fluids allocated.
+3. **Tertiary Aim (Dilution subtrees):** Massive reward if one side consists of $\le 2$ fluids (creating a long uninterrupted dilution chain) or exactly $1$ fluid.
+4. **Quaternary Aim (Dominance):** Reward isolating a fluid that takes up $\ge 50\%$ of its allocated side.
+5. **1-Level Lookahead Downstream Estimation:** Similar to LARP, it evaluates if making this split will guarantee a clean zero-split mix on the next step.
+
+### Characteristics of ILP
+By heavily penalizing split fluids via mathematical rigor, ILP forces fluids to remain whole for as long as possible. The result is extremely tight, predictable, and rigidly isolated fluid routing allocations, highly suitable for 2D topological mapping on a physical microfluidic array.
