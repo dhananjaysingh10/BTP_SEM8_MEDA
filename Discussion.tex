@@ -1,0 +1,108 @@
+% Chapter 6: Discussion and Trade-offs
+% Covers thesis.md §10
+
+This chapter discusses the key findings, trade-offs, and implications of the experimental results presented in Chapter~5.
+
+\section{The Splits-vs-Dilution Trade-off}
+
+The single clearest finding of this work: \textbf{splits and dilution are negatively correlated under a fixed depth budget}. The five algorithms cluster into three regimes on this two-dimensional frontier, as illustrated in Figure~\ref{fig:tradeoff} and Table~\ref{tab:regimes}.
+
+\begin{table}[H]
+\centering
+\caption{Three regimes on the splits-vs-dilution trade-off frontier.}
+\label{tab:regimes}
+\begin{tabular}{|l|l|p{7cm}|}
+\hline
+\textbf{Regime} & \textbf{Algorithms} & \textbf{Property} \\
+\hline
+Dilution-optimized & RMA, AP-DP & Long dilution chains, but $\geq 16$ splits on average \\
+\hline
+\textbf{Balanced (proposed)} & \textbf{LARP, ILP} & 13 splits \textit{and} 12.6+ dilution---neither extreme \\
+\hline
+Split-optimized & BS & 12.3 splits but only 8.7 dilution---catastrophic on dilution \\
+\hline
+\end{tabular}
+\end{table}
+
+No algorithm dominates the others. The contribution of this work is \textbf{filling the previously unoccupied middle of the frontier}, where neither BS (which ignores dilution) nor RMA (which freely splits) was a competitive option.
+
+\begin{figure}[H]
+\centering
+\begin{tabular}{c}
+\texttt{HIGH dilution} \\
+\texttt{\ \ \ \ RMA (16.4)\ \ \ \ $\bullet$} \\
+\texttt{\ \ \ \ AP-DP (16.1)\ $\bullet$} \\
+\texttt{} \\
+\texttt{\ \ \ \ LARP (12.6)\ \ $\bullet$ $\leftarrow$ proposed contribution} \\
+\texttt{\ \ \ \ ILP\ \ (13.0)\ \ $\bullet$} \\
+\texttt{} \\
+\texttt{\ \ \ \ BS\ \ \ (8.7)\ \ \ $\bullet$} \\
+\texttt{LOW dilution} \\
+\texttt{-----------------------------------} \\
+\texttt{16 splits\ \ \ \ 13 splits\ \ \ \ 12 splits}
+\end{tabular}
+\caption{Splits-vs-dilution trade-off frontier. The proposed algorithms (LARP, ILP) fill the previously empty middle.}
+\label{fig:tradeoff}
+\end{figure}
+
+\section{LARP vs ILP --- Effectively the Same Algorithm}
+
+A crucial honest finding (Section~5.5): \textbf{LARP and ILP produce indistinguishable trees on 226 of 323 tests (70\%)}. Although their internal candidate generators differ (LARP enumerates subset-sum partitions; ILP runs an integer-allocation DP), their final picks coincide in the vast majority of cases.
+
+\begin{itemize}
+    \item On the 30\% of tests where they differ, LARP wins as often as ILP loses, with both staying within $\pm 2\%$ on every average metric.
+    \item ILP's worst-case wall-time (4.4~s) is \textbf{two orders of magnitude} larger than LARP's (62~ms) for the same answer.
+\end{itemize}
+
+The honest framing: this is \textit{empirical evidence that beam-augmented partition-pick algorithms have converged on the practical optimum}---different candidate-enumeration strategies arrive at the same answers because the answer is essentially fixed by the input. \textbf{For practical use, LARP is the recommended algorithm; ILP is retained as a candidate-richer reference implementation.}
+
+\section{BS Is Unbeatable on Splits}
+
+Section~5.6 shows that BS is at-least-tied for fewest splits on every test in the suite (100\%), and uniquely best on 38.7\%. No proposed algorithm ever beats BS on splits in absolute count.
+
+This does not weaken the contribution. BS achieves split-optimality by \textbf{scattering fluids across the tree level-by-level} based on bit position, which is structurally orthogonal to dilution-friendly construction. The proposed algorithms' value is that they \textbf{match BS's split count on 59\% of tests} while preserving the dilution structure that BS destroys (BS dilution = 1.81 vs.\ LARP = 12.57). On a chip where both reagent dispenses and routing locality matter (most realistic chips), LARP is the better choice.
+
+\section{When to Use Which Algorithm}
+
+Table~\ref{tab:recommendations} provides practical recommendations.
+
+\begin{table}[H]
+\centering
+\caption{Recommended algorithm by use case.}
+\label{tab:recommendations}
+\begin{tabular}{|p{9cm}|l|}
+\hline
+\textbf{Use Case} & \textbf{Recommended} \\
+\hline
+Splits-dominated cost only; ignore routing & BS \\
+\hline
+Long dilution chains, layout-routing-dominated cost (PCR-style) & RMA \\
+\hline
+Both reagent dispenses \textit{and} dilution matter (most realistic assays) & \textbf{LARP} \\
+\hline
+Same as above, maximum candidate exploration (compute is cheap) & \textbf{ILP} \\
+\hline
+Pedagogical baseline / comparison reference & AP-DP \\
+\hline
+\end{tabular}
+\end{table}
+
+\section{The Role of Beam Search}
+
+Beam search is not a novel algorithmic technique---it is a 1970s AI textbook tool. Its contribution here is empirical: applied at width $K = 3$ with proper memoization to a well-designed candidate-generator (LARP or ILP), it eliminates the gap between the heuristic candidate-score estimate and the true downstream cost, \textbf{recovering 9--14\% on the design objective for $\sim$10$\times$ wall-time}. This is a favourable engineering trade-off in any regime where reagent cost dominates compute cost (i.e., the entire wet-lab use case).
+
+\section{Why AP-DP Underperforms}
+
+AP-DP was the most ambitious of the local-scoring algorithms in the original design but loses on most metrics post-correction. The reason: AP-DP's candidate generators are an arbitrary subset of those LARP enumerates, so it is \textit{strictly weaker} in candidate diversity. Its retention as a baseline (memoization-only, no beam search) preserves its identity as a ``sophisticated greedy''---useful as the bridge between RMA and the lookahead methods.
+
+\section{Methodological Note: Why the 4-Metric Composite Is the Honest View}
+
+The 7-metric composite originally used in this work was found to have three sources of inflation:
+
+\begin{enumerate}
+    \item \textbf{Mathematical redundancy.} $\text{leaves} = \text{mixes} + 1$ in any binary tree---empirically confirmed by the identical win-rate vectors for Mixes, Splits, and Leaves.
+    \item \textbf{Empirical correlation.} Splits and mixes have identical per-test win patterns, indicating they rank algorithms identically per test.
+    \item \textbf{Constant-offset metric.} Depth is determined by the input, contributing zero discrimination.
+\end{enumerate}
+
+After correction, the 4-metric composite ($m, l, \text{maxL}, p$) gives per-rank distributions that vary substantially across algorithms, which the inflated composite hid. The corrected composite is the basis for all ``best'' claims in this work.

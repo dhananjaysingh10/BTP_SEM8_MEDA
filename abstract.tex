@@ -1,0 +1,17 @@
+\begin{center}
+\textbf{\Large ABSTRACT}
+\end{center}
+
+\vspace{1cm}
+
+Digital Microfluidic Biochips (DMFBs) manipulate discrete droplets on a two-dimensional electrode grid using electrowetting-on-dielectric (EWOD) to perform biochemical protocols such as PCR preparation, immunoassays, and clinical diagnostics. A critical pre-processing step in these protocols is \textit{sample preparation}, wherein reagents must be combined in a precise volumetric ratio. On a DMFB, this is realized by constructing a \textit{mixing tree}---a binary tree whose leaves are dispense events and whose internal nodes are 50:50 mix-merge operations---such that the root droplet achieves the target composition. The quality of the mixing tree is evaluated across multiple competing metrics: mix count, fluid-split count, dilution-chain length, maximum dilution depth, leaf count, parallelism, and tree depth.
+
+This work presents three new mixing-tree construction algorithms---\textbf{Adaptive Partitioning via Dynamic Programming (AP-DP)}, \textbf{Lookahead-Augmented Recursive Partitioning (LARP)}, and an \textbf{Integer-Allocation DP heuristic (ILP)}---and a \textbf{beam-search with memoization meta-framework} that augments any partitioning-based algorithm. These are benchmarked against two classical baselines: the \textbf{Ratioed Mixing Algorithm (RMA)} by Roy et al.\ (2010) and the \textbf{Bit-Scanning (BS)} method by Thies et al., across a stratified suite of 323 deterministic test cases spanning 10 input categories.
+
+On this benchmark, beam-augmented LARP achieves \textbf{17.6\% fewer fluid splits} than RMA and \textbf{44.5\% longer dilution chains} than BS, occupying a previously unfilled middle of the splits-versus-dilution trade-off curve. LARP ranks first or second on 57\% of tests and last on only 1.5\%, making it the most consistent algorithm in the suite. The beam-search meta-framework contributes a further 9--14\% improvement on the design objective (splits and mixes) at approximately 10$\times$ wall-time cost, a favourable trade-off when reagent cost dominates compute cost.
+
+The proposed algorithms fill a gap between split-optimized methods (BS) that ignore dilution structure and dilution-optimized methods (RMA) that incur excessive splits, providing practitioners with a balanced operating point suitable for realistic assays where both reagent dispenses and routing locality matter.
+
+\vspace{0.5cm}
+
+\noindent\textbf{Keywords:} Digital Microfluidic Biochip, DMFB, Sample Preparation, Mixing Tree, Partitioning Algorithm, Beam Search, Memoization, LARP, Dilution, EWOD.

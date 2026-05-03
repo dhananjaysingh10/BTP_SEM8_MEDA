@@ -1,0 +1,115 @@
+% Chapter 2: Literature Review
+% Covers thesis.md §4 (Literature Survey: Existing Algorithms)
+
+This chapter reviews the existing algorithms for mixing-tree construction on digital microfluidic biochips. The field spans over 15 years of research. Only RMA and BS are implemented in this work as baselines; the remaining algorithms are discussed as related work.
+
+\section{RMA --- Ratioed Mixing Algorithm}
+\label{sec:rma}
+
+\textbf{Reference:} Roy, Bhattacharya, Chakrabarti, and Chakrabarty~\cite{roy2010layout} proposed the Ratioed Mixing Algorithm (RMA) for layout-aware solution preparation on DMFBs.
+
+\textbf{Strategy:} RMA is a top-down greedy algorithm. At each node, the \textbf{dominant fluid} (highest count) is assigned first to one child up to volume $L/2$; remaining capacity is filled by splitting the next-largest fluid as needed.
+
+\textbf{Strength:} Long dilution chains (high $l$ and $\text{maxL}$); good for hardware layouts where serial dilution is cheap.
+
+\textbf{Weakness:} Greedy myopia---a locally optimal dominant-fluid pick can force more splits or mixes downstream than necessary.
+
+\section{BS --- Bit-Scanning}
+\label{sec:bs}
+
+\textbf{Reference:} Thies et al.~\cite{thies_bs} proposed the Bit-Scanning (BS) approach for mixture generation on DMFBs.
+
+\textbf{Strategy:} BS is a bottom-up, binary-encoding-driven algorithm. For each fluid $f$ with count $c_f$, the bit-pattern of $c_f$ indicates at which tree levels a leaf for $f$ must appear. Construction proceeds level-by-level, pairing leaves and previously-built subtrees.
+
+\textbf{Strength:} Minimum leaf count and fewest mixes among the baselines (every count is encoded in $O(\log c_f)$ leaves).
+
+\textbf{Weakness:} No awareness of fluid splits or dilution structure; trees have higher fluid scattering.
+
+\section{REMIA --- Reactant Minimization Algorithm}
+
+\textbf{Reference:} Hsieh et al.~\cite{hsieh_remia} proposed REMIA, which uses a skewed mixing tree combined with an exponential dilution tree, designed specifically to \textbf{minimize reactant usage}.
+
+\textbf{Trade-off:} REMIA often produces more waste droplets than IDMA/DMRW even though it consumes fewer total reagents.
+
+\textbf{Status:} Not implemented in this work. Listed as primary related work; recommended as a future-work baseline.
+
+\section{WARA --- Waste Recycling Algorithm}
+
+WARA addresses multi-target sample preparation. It builds REMIA-style mixing trees per target, then identifies opportunities to recycle waste droplets from one target's tree as inputs to another.
+
+\textbf{Status:} Not implemented; multi-target sample preparation is out of scope for this work, which focuses on single-target preparation.
+
+\section{IDMA / DMRW}
+
+The Improved Dilution and Mixing Algorithm (IDMA) and Dilution and Mixing with Reduced Wastage (DMRW)~\cite{waste_aware_2014} both target the dilution subproblem (one reagent plus one buffer) by carefully tracking waste-droplet recycling within a single tree.
+
+\textbf{Status:} Not implemented; their domain (single-reagent dilution) is a special case of the general multi-fluid mixing addressed here.
+
+\section{MinMix and CoDOS}
+
+MinMix and CoDOS are generic mixing-tree construction baselines from earlier work, frequently cited alongside RMA.
+
+\textbf{Status:} Not implemented; RMA is used as the representative greedy baseline.
+
+\section{Skewed Mixing Trees}
+
+Mitra et al.~\cite{mitra2013skewed} proposed using deliberately unbalanced (skewed) trees to exploit reagent-asymmetry and reduce reactant volume.
+
+\textbf{Status:} Not implemented; orthogonal in tree-shape philosophy to this work.
+
+\section{Layout-Aware Mixture Preparation}
+
+Bhattacharjee et al.~\cite{bhattacharjee2015layout} coupled mixing-tree construction to physical chip layout, jointly optimizing routing distance and reagent count.
+
+\textbf{Status:} Not implemented; this work is layout-agnostic at present (a clear future-work direction).
+
+\section{Demand-Driven Preparation with Droplet Streaming}
+
+This approach~\cite{dac2014demand} optimizes for repeated mixture demand (e.g., master-mix in PCR) rather than single-target output.
+
+\textbf{Status:} Not implemented.
+
+\section{ILP-based Synthesis for Sample Preparation}
+
+The ILP-based synthesis approach~\cite{ilp_ieee2016} models the sample-preparation problem as an integer linear program and solves it with a commercial solver (CPLEX/Gurobi).
+
+\textbf{Relevance to this work:} This is the \textit{solver-based} ILP approach, \textbf{distinct from our ``ILP'' algorithm} described in Chapter~3, which is an integer-allocation \textbf{DP heuristic} (no LP relaxation, no commercial solver). We share the integer-allocation framing but not the solution method. We do not directly compare against this work because we do not have the solver setup.
+
+\section{SIMOP --- Simulation-Guided Optimization}
+
+SIMOP~\cite{simop2021} couples tree generation with simulated chip behavior to optimize accuracy and error management from unbalanced splits.
+
+\textbf{Status:} Not implemented.
+
+\section{Summary of Literature Coverage}
+
+Table~\ref{tab:lit_coverage} summarizes the algorithm families in the literature and their implementation status in this work.
+
+\begin{table}[H]
+\centering
+\caption{Summary of algorithm families and implementation status.}
+\label{tab:lit_coverage}
+\begin{tabular}{|l|l|l|}
+\hline
+\textbf{Family} & \textbf{Algorithms} & \textbf{Implemented?} \\
+\hline
+Greedy top-down & RMA, MinMix, CoDOS & RMA only \\
+\hline
+Bottom-up bitwise & BS & Yes \\
+\hline
+Reactant-minimal & REMIA, IDMA, DMRW & No (future work) \\
+\hline
+Multi-target & WARA & No (out of scope) \\
+\hline
+Layout-aware & Bhattacharjee et al. & No (future work) \\
+\hline
+Skewed-tree & Mitra et al. & No \\
+\hline
+Solver-based & ILP-based Synthesis & No (heuristic ILP only) \\
+\hline
+Simulation-guided & SIMOP & No \\
+\hline
+\end{tabular}
+\end{table}
+
+The two implemented baselines---RMA and BS---represent the two extremes of the splits-versus-dilution trade-off: RMA optimizes for long dilution chains at the cost of more splits, while BS minimizes mixes and splits at the cost of destroyed dilution structure. The proposed algorithms in Chapter~3 aim to fill the gap between these extremes.

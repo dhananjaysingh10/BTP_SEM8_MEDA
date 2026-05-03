@@ -1,0 +1,76 @@
+% Chapter 7: Conclusion and Future Work
+% Covers thesis.md §11 and §13
+
+\section{Summary of Contributions}
+
+This work has presented:
+
+\begin{enumerate}
+    \item \textbf{Three new mixing-tree construction algorithms}---AP-DP, LARP, and ILP---that target the splits-versus-dilution trade-off in DMFB sample preparation. LARP and ILP, augmented with beam search, achieve 17.6\% fewer splits than RMA and 44.5\% longer dilution chains than BS, occupying a previously unfilled middle of the trade-off curve.
+    
+    \item \textbf{A beam-search with memoization meta-framework} that is applicable to any partitioning-based mixing-tree algorithm. Applied at width $K = 3$, it yields 9--14\% improvement on the design objective (splits and mixes) at approximately 10$\times$ wall-time cost.
+    
+    \item \textbf{A 323-test stratified empirical benchmark} with 7 metrics, deterministic seed, and full reproducibility, enabling rigorous comparison of mixing-tree algorithms.
+    
+    \item \textbf{Identification of the splits-versus-dilution trade-off curve}, demonstrating that no single algorithm dominates and quantifying the ``balanced'' operating point occupied by the proposed algorithms.
+\end{enumerate}
+
+The recommended algorithm for practical use is \textbf{LARP with beam search $K = 3$}. It is within $\pm 10\%$ of every algorithm's per-metric optimum, ranks last on only 5/323 tests (1.5\%), and runs in 7~ms average per construction (62~ms worst case).
+
+\section{Limitations}
+\label{sec:limitations}
+
+The following limitations are honestly acknowledged:
+
+\begin{itemize}
+    \item \textbf{LARP and ILP are near-equivalent in output} (70\% of tests produce identical trees). Effectively the proposed contribution is one algorithm with two candidate-enumeration strategies, not two distinct algorithms.
+    
+    \item \textbf{BS is never beaten on splits.} LARP/ILP can only match BS's split count, not exceed it. The contribution is balance, not absolute split-minimization.
+    
+    \item \textbf{No comparison to REMIA / WARA / IDMA / DMRW.} These are major prior algorithms in the DMFB literature. Their absence is acknowledged; their inclusion would strengthen the empirical comparison.
+    
+    \item \textbf{No real ILP solver.} The algorithm named ``ILP'' in this work is a DP heuristic, not actual integer linear programming. The 2016 IEEE ILP paper~\cite{ilp_ieee2016} (CPLEX/Gurobi-based) provides a true solver-based baseline that this work does not match.
+    
+    \item \textbf{Layout-agnostic.} No physical chip routing, electrode-occupancy model, or transport-cost model. Layout-aware methods~\cite{bhattacharjee2015layout} are not benchmarked.
+    
+    \item \textbf{No hardware-cost model.} Metrics are graph-theoretic, not in chip seconds or microliters of reagent. Splits is a proxy for reagent dispenses, not for actual reagent volume.
+    
+    \item \textbf{No statistical-significance tests} in the current benchmark output (e.g., Wilcoxon signed-rank). Per-test numbers are reported but no $p$-values.
+    
+    \item \textbf{ILP's worst-case 4.4-second tail} is hostile for interactive UI use on inputs with $> 25$ fluids.
+    
+    \item \textbf{No optimality bounds.} A brute-force optimal solver for small $n \leq 5$ would establish how close beam-augmented LARP comes to the true minimum.
+\end{itemize}
+
+\section{Future Work}
+
+The following directions are recommended, in priority order:
+
+\begin{enumerate}
+    \item \textbf{Implement REMIA and WARA} as published baselines---adds the two strongest comparison points the current work lacks.
+    
+    \item \textbf{Add a brute-force optimal solver} for small inputs ($n \leq 5$) to establish a ceiling for beam-augmented LARP.
+    
+    \item \textbf{Add Wilcoxon signed-rank tests} to the benchmark for paired pre-/post-Phase-B comparisons (provides $p$-values for the abstract).
+    
+    \item \textbf{Replace ILP's Phase-1 DP with a real ILP} via \texttt{glpk-js} or a similar in-browser solver; use as quality oracle on small inputs.
+    
+    \item \textbf{Add a hardware-cost model} (transport, dispenses, contamination) and re-rank algorithms.
+    
+    \item \textbf{Multi-target preparation} (\`{a} la WARA)---reuse waste droplets across targets.
+    
+    \item \textbf{Layout-aware variants}---joint optimization of tree and routing.
+\end{enumerate}
+
+\section{Naming Note: What ``ILP'' Means in This Work}
+\label{sec:ilp_naming}
+
+The algorithm referred to as ``ILP'' in this work and codebase is \textbf{not actual integer linear programming with a solver} (CPLEX, Gurobi, GLPK). It is a dynamic-programming (DP) heuristic that:
+
+\begin{itemize}
+    \item Tracks \textbf{integer-valued allocation states}---for each fluid, an integer count indicating how much goes into the left child of the partition.
+    \item Prunes the search using a \textbf{non-domination rule} on (split count, allocation) pairs.
+    \item Caps the number of states per running sum ($\text{ALLOC\_CAP} = 32$) to keep runtime tractable.
+\end{itemize}
+
+The ``ILP'' name is retained because the algorithm operates on integer allocation variables and uses a frontier-pruning strategy reminiscent of solver-based methods. Solver-based ILP work for the same problem~\cite{ilp_ieee2016} uses commercial solvers and is \textbf{distinct from our algorithm}---we cite it as related work but do not directly compare. Our ILP gives no global-optimality guarantee; it is a tractable heuristic, not an exact solver.

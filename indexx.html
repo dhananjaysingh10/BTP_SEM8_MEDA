@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box
+        }
+
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 24px
+        }
+
+        .card {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 16px;
+            padding: 36px;
+            max-width: 580px;
+            width: 100%;
+            text-align: center
+        }
+
+        h1 {
+            font-size: 26px;
+            font-weight: 800;
+            margin-bottom: 6px;
+            background: linear-gradient(135deg, #6366f1, #06b6d4);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent
+        }
+
+        .sub {
+            color: #94a3b8;
+            font-size: 13px;
+            margin-bottom: 24px
+        }
+
+        .btn {
+            padding: 14px 36px;
+            font-size: 15px;
+            font-weight: 700;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all .2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #6366f1, #06b6d4);
+            color: #fff
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px rgba(99, 102, 241, .4)
+        }
+
+        .info {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin: 18px 0;
+            flex-wrap: wrap
+        }
+
+        .info-item {
+            background: #0f172a;
+            border-radius: 8px;
+            padding: 7px 13px;
+            font-size: 12px
+        }
+
+        .info-item b {
+            color: #06b6d4
+        }
+
+        .status {
+            margin-top: 14px;
+            font-size: 13px;
+            min-height: 20px
+        }
+
+        .preview {
+            margin-top: 20px;
+            text-align: left;
+            background: #0f172a;
+            border-radius: 10px;
+            padding: 14px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-size: 11px;
+            color: #94a3b8;
+            line-height: 1.7
+        }
+
+        .preview b {
+            color: #06b6d4
+        }
+
+        .preview .sl {
+            color: #e2e8f0;
+            font-weight: 700;
+            margin-top: 6px;
+            display: block
+        }
+    </style>
+</head>
+
+<body>
+    <div class="card">
+        <h1>🧬 LARP Presentation</h1>
+        <p class="sub">Download as PowerPoint (.pptx) — 15 slides with benchmark data, pseudocode, tables & diagrams</p>
+        <div class="info">
+            <div class="info-item"><b>15</b> Slides</div>
+            <div class="info-item"><b>5</b> Algorithms</div>
+            <div class="info-item"><b>100</b> Test Results</div>
+            <div class="info-item"><b>7</b> Metrics</div>
+        </div>
+        <button class="btn btn-primary" id="dlBtn" onclick="gen()">⬇️ Download .pptx</button>
+        <div class="status" id="st"></div>
+        <div class="preview">
+            <b>Slide Preview:</b>
+            <span class="sl">01 — Title</span>LARP: Lookahead-Augmented Recursive Partitioning
+            <span class="sl">02 — Outline</span>14-section agenda
+            <span class="sl">03 — Introduction</span>Lab-on-chip, DMFBs, MEDA, LARP contribution
+            <span class="sl">04 — Background</span>MEDA architecture, metrics, DMFB vs MEDA
+            <span class="sl">05 — Problem Statement</span>Multi-objective optimization, core tradeoff
+            <span class="sl">06 — Existing Algorithms</span>RMA & BS strengths/weaknesses
+            <span class="sl">07 — LARP Overview</span>5 strategies, scoring function, lookahead
+            <span class="sl">08 — LARP Pseudocode</span>buildLARP, DP enumeration, deepScore
+            <span class="sl">09 — Mixing Tree Diagrams</span>RMA vs BS vs LARP comparison
+            <span class="sl">10 — System Architecture</span>React app, ~800 LOC, 5 engines
+            <span class="sl">11 — Benchmark Results</span>Full table + analysis (100 iterations)
+            <span class="sl">12 — Scatter: Mixes vs maxL</span>Goldilocks sweet-spot
+            <span class="sl">13 — Radar Profile</span>Multi-metric normalized scores
+            <span class="sl">14 — Conclusion & Future</span>Contributions + roadmap
+            <span class="sl">15 — Thank You</span>
+        </div>
+    </div>
+    <script>
+        // EMU helpers: 1 inch = 914400 EMU
+        const I = 914400, W = 12192000, H = 6858000;
+        const ex = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+        function txBox(x, y, w, h, runs, opts = {}) {
+            const { bold, sz, algn, lnSpc, anchor } = Object.assign({ bold: false, sz: 1400, algn: 'l', lnSpc: 120, anchor: 't' }, opts);
+            let xml = `<p:sp><p:nvSpPr><p:cNvPr id="0" name=""/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>`;
+            xml += `<p:spPr><a:xfrm><a:off x="${Math.round(x * I)}" y="${Math.round(y * I)}"/><a:ext cx="${Math.round(w * I)}" cy="${Math.round(h * I)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>`;
+            xml += `<p:txBody><a:bodyPr wrap="square" anchor="${anchor}"/><a:lstStyle/>`;
+            if (typeof runs === 'string') runs = [{ t: runs }];
+            // Group runs by paragraph (split on \n)
+            let paras = []; let cur = [];
+            for (const r of runs) {
+                const parts = r.t.split('\n');
+                parts.forEach((p, i) => {
+                    cur.push({ t: p, b: r.b || bold, s: r.s || sz, c: r.c || 'E2E8F0', ff: r.ff || 'Calibri' });
+                    if (i < parts.length - 1) { paras.push(cur); cur = []; }
+                });
+            }
+            paras.push(cur);
+            for (const p of paras) {
+                xml += `<a:p><a:pPr algn="${algn}"><a:lnSpc><a:spcPct val="${lnSpc}000"/></a:lnSpc></a:pPr>`;
+                for (const r of p) {
+                    xml += `<a:r><a:rPr lang="en-US" sz="${r.s}" b="${r.b ? 1 : 0}" dirty="0"><a:solidFill><a:srgbClr val="${r.c}"/></a:solidFill><a:latin typeface="${r.ff}"/></a:rPr><a:t>${ex(r.t)}</a:t></a:r>`;
+                }
+                xml += `</a:p>`;
+            }
+            xml += `</p:txBody></p:sp>`;
+            return xml;
+        }
+
+        function rect(x, y, w, h, fill) {
+            return `<p:sp><p:nvSpPr><p:cNvPr id="0" name=""/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${Math.round(x * I)}" y="${Math.round(y * I)}"/><a:ext cx="${Math.round(w * I)}" cy="${Math.round(h * I)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="${fill}"/></a:solidFill></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr/></a:p></p:txBody></p:sp>`;
+        }
+
+        function makeSlide(bg, shapes) {
+            return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+<p:cSld><p:bg><p:bgPr><a:solidFill><a:srgbClr val="${bg}"/></a:solidFill><a:effectLst/></p:bgPr></p:bg><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>
+${shapes}
+</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`;
+        }
+
+        function gen() {
+            const st = document.getElementById('st');
+            const btn = document.getElementById('dlBtn');
+            st.textContent = '⏳ Generating 15 slides...'; st.style.color = '#f59e0b';
+            btn.disabled = true;
+            setTimeout(() => {
+                try {
+                    const slides = [];
+                    const bg = '0F172A', bg2 = '1A2332';
+
+                    // S1: TITLE
+                    slides.push(makeSlide(bg,
+                        rect(0, 0, 13.33, 7.5, '0F172A') +
+                        txBox(0, 1.0, 13.33, 0.8, [{ t: '🧬', s: 4000, c: 'FFFFFF' }], { algn: 'ctr' }) +
+                        txBox(1, 2.0, 11.33, 2, [{ t: 'LARP: Lookahead-Augmented\nRecursive Partitioning for\nDigital Microfluidic Biochips', s: 2800, b: true, c: 'FFFFFF' }], { algn: 'ctr', lnSpc: 115 }) +
+                        rect(5.5, 4.3, 2.3, 0.05, '06B6D4') +
+                        txBox(0, 4.6, 13.33, 0.5, [{ t: 'B.Tech Project — Semester 8', s: 1600, c: '06B6D4' }], { algn: 'ctr' }) +
+                        txBox(0, 5.2, 13.33, 0.8, [{ t: 'Dhananjay Singh  •  2025–26', s: 1200, c: '94A3B8' }], { algn: 'ctr' })
+                    ));
+
+                    // S2: OUTLINE
+                    slides.push(makeSlide(bg,
+                        txBox(0.6, 0.3, 12, 0.6, [{ t: '📋 Presentation Outline', s: 2400, b: true, c: 'FFFFFF' }]) +
+                        txBox(0.6, 1.0, 12, 6, [{
+                            t:
+                                '01 — Introduction & Motivation\n02 — Background — MEDA Biochips\n03 — Problem Statement\n04 — Existing Algorithms (RMA, BS)\n05 — LARP Algorithm — Overview\n06 — LARP Pseudocode Deep Dive\n07 — Mixing Tree Diagrams\n08 — System Architecture & App\n09 — Benchmark Results (100 tests)\n10 — Scatter: Mixes vs maxL\n11 — Radar: Multi-Metric Profile\n12 — Conclusion & Future Work\n13 — References\n14 — Thank You',
+                            s: 1300, c: '94A3B8'
+                        }], { lnSpc: 160 })
+                    ));
+
+                    // S3: INTRODUCTION
+                    slides.push(makeSlide(bg,
+                        txBox(0.6, 0.3, 12, 0.6, [{ t: '🎯 Introduction & Motivation', s: 2400, b: true, c: 'FFFFFF' }]) +
+                        txBox(0.6, 0.85, 12, 0.3, [{ t: 'Why mixing tree algorithms matter for biochips', s: 1300, c: '06B6D4' }]) +
+                        txBox(0.6, 1.4, 12, 5.5, [
+                            { t: '🏥 Lab-on-Chip Revolution\n', b: true, s: 1400, c: 'FFFFFF' },
+                            { t: 'Microfluidic biochips miniaturize DNA sequencing, immunoassays, PCR, and clinical diagnostics — enabling rapid, low-cost point-of-care testing.\n\n', s: 1100, c: '94A3B8' },
+                            { t: '💧 Digital Microfluidic Biochips (DMFBs)\n', b: true, s: 1400, c: 'FFFFFF' },
+                            { t: 'DMFBs manipulate discrete droplets using electrowetting (EWOD). Sample preparation requires constructing a mixing tree — a sequence of binary split/merge operations.\n\n', s: 1100, c: '94A3B8' },
+                            { t: '⚡ The Challenge\n', b: true, s: 1400, c: 'FFFFFF' },
+                            { t: 'Existing algorithms (RMA, BS) are myopic — locally optimal decisions without considering how current partitions affect future tree levels.\n\n', s: 1100, c: '94A3B8' },
+                            { t: '🎯 Our Contribution — LARP v2\n', b: true, s: 1400, c: 'FFFFFF' },
+                            { t: 'A novel Lookahead-Augmented Recursive Partitioning algorithm with DP-based exhaustive enumeration and 2-level lookahead scoring — bridging the gap between low mix count and high structural isolation.', s: 1100, c: '94A3B8' },
+                        ], { lnSpc: 110 })
+                    ));
+
+                    // S4: BACKGROUND
+                    slides.push(makeSlide(bg,
+                        txBox(0.6, 0.3, 12, 0.6, [{ t: '🔬 Background — MEDA Biochips', s: 2400, b: true, c: 'FFFFFF' }]) +
+                        txBox(0.6, 0.85, 6, 0.3, [{ t: 'Architecture & mixing tree fundamentals', s: 1300, c: '06B6D4' }]) +
+                        txBox(0.6, 1.3, 6, 3, [
+                            { t: 'MEDA Architecture\n', b: true, s: 1300, c: 'FFFFFF' },
+                            { t: '• 2D array of identical microelectrode cells (MCs)\n• Each MC: microelectrode + control/sensing circuit\n• Dynamic grouping → reconfigurable modules\n• TSMC 0.35 µm CMOS — 3.3V operation\n• Channel dispensing for precise volume splits\n• Diagonal routing for flexible droplet transport', s: 1050, c: '94A3B8' }
+                        ], { lnSpc: 130 }) +
+                        txBox(7, 1.3, 5.8, 3, [
+                            { t: 'Key Metrics\n', b: true, s: 1300, c: 'FFFFFF' },
+                            { t: '• m = Mixes (total internal nodes)\n• d = Tree Depth\n• p = Max Parallelism\n• Leaves = Dispensing count\n• Splits = Fluids divided between children\n• l = Dilution Sum (Σ dilution subtree depths)\n• maxL = Longest single dilution chain', s: 1050, c: '94A3B8' }
+                        ], { lnSpc: 130 }) +
+                        rect(0.6, 4.6, 12, 2.2, bg2) +
+                        txBox(0.8, 4.7, 11.6, 2, [
+                            { t: 'DMFB vs MEDA Comparison\n', b: true, s: 1200, c: 'FFFFFF' },
+                            { t: 'Feature        | DMFB              | MEDA\nMixing Ratio  | 1:1 only           | m:n (flexible)\nElectrode      | Large, fixed       | ~10× smaller\nSensing         | External CCD    | Built-in per cell\nVoltage          | Tens of volts    | 3.3V (CMOS)\nVolume Ctrl    | Coarse (½)       | Fine-grained', s: 950, c: '94A3B8', ff: 'Courier New' }
+                        ], { lnSpc: 120 })
+                    ));
+
+                    // S5: PROBLEM
+                    slides.push(makeSlide(bg,
+                        txBox(0.6, 0.3, 12, 0.6, [{ t: '❓ Problem Statement', s: 2400, b: true, c: 'FFFFFF' }]) +
+                        rect(0.6, 1.0, 12, 1.2, bg2) +
+                        txBox(0.8, 1.1, 11.6, 1, [
+                            { t: 'Formal Definition: ', b: true, s: 1200, c: 'FFFFFF' },
+                            { t: 'Given target ratio P = {x₁:a₁, ..., xₙ:aₙ} at accuracy depth d, construct a binary mixing tree of volume L = 2ᵈ that simultaneously:', s: 1100, c: '94A3B8' }
+                        ], { lnSpc: 120 }) +
+                        txBox(0.6, 2.5, 12, 2, [
+                            { t: '1. Minimize Mixes (m)', b: true, s: 1400, c: 'EF4444' }, { t: ' — fewer mixing operations → faster bioassay\n', s: 1100, c: '94A3B8' },
+                            { t: '2. Minimize Fluid Splits', b: true, s: 1400, c: 'F59E0B' }, { t: ' — less cross-contamination on physical chip\n', s: 1100, c: '94A3B8' },
+                            { t: '3. Maximize Dilution Isolation (l, maxL)', b: true, s: 1400, c: '22C55E' }, { t: ' — cleaner layout mapping', s: 1100, c: '94A3B8' },
+                        ], { lnSpc: 150 }) +
+                        rect(0.6, 4.8, 12, 1.5, bg2) +
+                        txBox(0.8, 4.9, 11.6, 1.3, [
+                            { t: 'The Core Tradeoff:\n', b: true, s: 1200, c: 'FFFFFF' },
+                            { t: 'BS achieves lowest m=22.50 but worst maxL=1.73 (destroys isolation).\nRMA achieves best maxL=5.75 but worst m=27.59.\nLARP bridges this gap — m=25.57 with maxL=5.72.', s: 1100, c: '06B6D4' }
+                        ], { lnSpc: 130 })
+                    ));
+
+                    // S6: EXISTING ALGOS
+                    slides.push(makeSlide(bg,
+                        txBox(0.6, 0.3, 12, 0.6, [{ t: '📖 Existing Algorithms — RMA & BS', s: 2400, b: true, c: 'FFFFFF' }]) +
+                        rect(0.6, 1.0, 5.8, 2.8, bg2) +
+                        txBox(0.8, 1.1, 5.4, 2.6, [
+                            { t: 'RMA — Ratioed Mixing (Roy et al.)\n', b: true, s: 1200, c: 'EF4444' },
+                            { t: 'Greedy top-down: always assigns dominant fluid first.\n\n', s: 1000, c: '94A3B8' },
+                            { t: '✅ Highest structural isolation — maxL=5.75, l=20.69\n', s: 1000, c: '22C55E' },
+                            { t: '❌ Highest mix count m=27.59. Only 1 candidate/level.', s: 1000, c: 'EF4444' },
+                        ], { lnSpc: 125 }) +
+                        rect(6.9, 1.0, 5.8, 2.8, bg2) +
+                        txBox(7.1, 1.1, 5.4, 2.6, [
+                            { t: 'BS — Bit-Scanning (Thies et al.)\n', b: true, s: 1200, c: 'F59E0B' },
+                            { t: 'Bottom-up: tree from binary representation.\n\n', s: 1000, c: '94A3B8' },
+                            { t: '✅ Lowest mix count m=22.50, fewest splits=15.08\n', s: 1000, c: '22C55E' },
+                            { t: '❌ Destroys isolation: maxL=1.73, l=10.99 (~half)', s: 1000, c: 'EF4444' },
+                        ], { lnSpc: 125 }) +
+                        rect(0.6, 4.2, 12, 1, bg2) +
+                        txBox(0.8, 4.3, 11.6, 0.8, [
+                            { t: 'Also compared: ', b: true, s: 1100, c: 'FFFFFF' },
+                            { t: 'AP-DP v3 (multi-strategy DP, m=28.02, maxL=5.69) and ILP v2 (Pareto-optimal DP, m=24.97, maxL=5.49)', s: 1050, c: '94A3B8' }
+                        ]) +
+                        rect(0.6, 5.5, 12, 1.2, bg2) +
+                        txBox(0.8, 5.6, 11.6, 1, [
+                            { t: 'Key Insight: ', b: true, s: 1100, c: '06B6D4' },
+                            { t: 'Both RMA and BS are myopic — locally optimal without considering how current partitions affect future tree levels. LARP addresses this with lookahead scoring.', s: 1050, c: '94A3B8' }
+                        ], { lnSpc: 125 })
+                    ));
+
+                    // S7: LARP OVERVIEW
+                    slides.push(makeSlide(bg,
+                        txBox(0.6, 0.3, 12, 0.6, [{ t: '⚙️ LARP v2 — Algorithm Overview', s: 2400, b: true, c: 'FFFFFF' }]) +
+                        txBox(0.6, 0.85, 12, 0.3, [{ t: 'Lookahead-Augmented Recursive Partitioning', s: 1300, c: '06B6D4' }]) +
+                        rect(0.6, 1.3, 5.8, 3, bg2) +
+                        txBox(0.8, 1.4, 5.4, 2.8, [
+                            { t: '5 Partition Strategies:\n\n', b: true, s: 1200, c: 'FFFFFF' },
+                            { t: '0-split: ', b: true, s: 1050, c: '22C55E' }, { t: 'DP all bitmasks summing to L/2\n', s: 1000, c: '94A3B8' },
+                            { t: '1-split: ', b: true, s: 1050, c: 'F59E0B' }, { t: 'Top-5 sums + split one fluid\n', s: 1000, c: '94A3B8' },
+                            { t: '2-split: ', b: true, s: 1050, c: 'EF4444' }, { t: 'Split 2 fluids (fallback)\n', s: 1000, c: '94A3B8' },
+                            { t: 'RMA-style: ', b: true, s: 1050, c: '8B5CF6' }, { t: 'Dominant fluid fills one child\n', s: 1000, c: '94A3B8' },
+                            { t: 'Greedy: ', b: true, s: 1050, c: '64748B' }, { t: 'Balanced fill as ultimate fallback', s: 1000, c: '94A3B8' },
+                        ], { lnSpc: 130 }) +
+                        rect(6.9, 1.3, 5.8, 3, bg2) +
+                        txBox(7.1, 1.4, 5.4, 2.8, [
+                            { t: 'Scoring Function:\n\n', b: true, s: 1200, c: 'FFFFFF' },
+                            { t: 'splitPenalty = splits × 100\nfluidCount = |P₁| + |P₂|\nif |Pᵢ| ≤ 2: bonus -= 15\nif |Pᵢ| = 1: bonus -= 10\nif dominant ≥ 50%: bonus -= 8\n\n2-Level Lookahead:\nlaSplt = 50 × (la₁.splits + la₂.splits)\nlaDil = -20 × (la₁.dil + la₂.dil)\n\ntotal = splitPen + fluids + bonus\n       + laSplt + laDil + balance×2', s: 900, c: '06B6D4', ff: 'Courier New' }
+                        ], { lnSpc: 110 }) +
+                        rect(0.6, 4.6, 12, 2.2, bg2) +
+                        txBox(0.8, 4.7, 11.6, 2, [
+                            { t: 'Why LARP Is Different:\n', b: true, s: 1200, c: 'FFFFFF' },
+                            { t: '• Partition gen: All DP subsets (cap=64 masks/sum) vs 1 greedy candidate\n• Future-aware: Yes — 2-level lookahead vs No lookahead in RMA/BS\n• Guarantees zero-split if one exists — always\n• Complexity: O(d · n · L) total, <50ms for n≤12, d≤14', s: 1050, c: '94A3B8' }
+                        ], { lnSpc: 130 })
+                    ));
+
+                    // S8: PSEUDOCODE
+                    slides.push(makeSlide(bg,
+                        txBox(0.6, 0.3, 12, 0.6, [{ t: '💻 LARP — Pseudocode', s: 2400, b: true, c: 'FFFFFF' }]) +
+                        rect(0.6, 1.0, 6, 3.5, bg2) +
+                        txBox(0.8, 1.1, 5.6, 3.3, [{
+                            t:
+                                `buildLARP(P, L, maxD, level):
+1. Base: if |P|=1 or L≤1 → leaf
+2. candidates = larpEnumPartitions(P,L)
+   // Enumerates via 5 strategies
+3. For each candidate c:
+   score[c] = larpScore(c, L)
+4. best = argmin(score)
+5. return Mix(
+     buildLARP(best.P₁, L/2),
+     buildLARP(best.P₂, L/2))`, s: 950, c: '06B6D4', ff: 'Courier New'
+                        }], { lnSpc: 120 }) +
+                        rect(6.9, 1.0, 6, 3.5, bg2) +
+                        txBox(7.1, 1.1, 5.6, 3.3, [{
+                            t:
+                                `larpEnumPartitions — DP Core:
+dp[0] = [mask=0]
+for each fluid i with coeff v:
+  for s = half down to v:
+    if dp[s-v]: dp[s].push(mask|(1<<i))
+    // cap: 64 masks per sum
+
+larpDeepScore (Quick Lookahead):
+half = L/2; dp[0]=1
+for fluid f with coeff v:
+  for s=half down to v: dp[s]|=dp[s-v]
+return dp[half] ? 0 : 1
+
+Complexity: O(d·n·L), <50ms`, s: 900, c: '22C55E', ff: 'Courier New'
+                        }], { lnSpc: 118 }) +
+                        rect(0.6, 4.8, 12, 2, bg2) +
+                        txBox(0.8, 4.9, 11.6, 1.8, [
+                            { t: 'Key Implementation Details:\n', b: true, s: 1100, c: 'FFFFFF' },
+                            { t: '• DP bitmask enumeration with cap=64 per sum for memory efficiency\n• Bidirectional 1-split: tries splitting fluids from both P₁ and P₂ sides\n• 2-level lookahead runs quick DP to check if children can achieve 0-split\n• Dilution-aware scoring rewards partitions creating pure-fluid or 2-fluid subtrees', s: 1000, c: '94A3B8' }
+                        ], { lnSpc: 135 })
+                    ));
+
+                    // S9: MIXING TREES
+                    slides.push(makeSlide(bg,
+                        txBox(0.6, 0.3, 12, 0.6, [{ t: '🌳 Mixing Tree Diagrams', s: 2400, b: true, c: 'FFFFFF' }]) +
+                        txBox(0.6, 0.85, 12, 0.3, [{ t: 'How RMA, BS, and LARP partition differently', s: 1300, c: '06B6D4' }]) +
+                        rect(0.4, 1.3, 3.9, 3.5, bg2) +
+                        txBox(0.5, 1.4, 3.7, 0.3, [{ t: 'RMA (Greedy Top-Down)', b: true, s: 1100, c: 'EF4444' }]) +
+                        txBox(0.5, 1.8, 3.7, 2.8, [{
+                            t:
+                                `      [L=8]
+     /     \\
+  [x₁:4]  [Mix]
+           /    \\
+        [x₂:2] [Mix]
+                /   \\
+            [x₃:1][x₄:1]
+
+✅ Long chain  ❌ 3 mixes`, s: 850, c: '94A3B8', ff: 'Courier New'
+                        }], { lnSpc: 115 }) +
+                        rect(4.7, 1.3, 3.9, 3.5, bg2) +
+                        txBox(4.8, 1.4, 3.7, 0.3, [{ t: 'BS (Bottom-Up Bit-Scan)', b: true, s: 1100, c: 'F59E0B' }]) +
+                        txBox(4.8, 1.8, 3.7, 2.8, [{
+                            t:
+                                `       [L=8]
+      /     \\
+   [Mix]   [Mix]
+   /  \\    /   \\
+ [x₁][x₂][x₃][x₄]
+
+
+
+✅ 2 mixes  ❌ No isolation`, s: 850, c: '94A3B8', ff: 'Courier New'
+                        }], { lnSpc: 115 }) +
+                        rect(9, 1.3, 3.9, 3.5, bg2) +
+                        txBox(9.1, 1.4, 3.7, 0.3, [{ t: 'LARP (Lookahead DP)', b: true, s: 1100, c: '06B6D4' }]) +
+                        txBox(9.1, 1.8, 3.7, 2.8, [{
+                            t:
+                                `      [L=8]
+     /     \\
+  [x₁:4]  [Mix]
+           /    \\
+        [x₂:2][x₃+x₄]
+               /    \\
+           [x₃:1] [x₄:1]
+
+✅ 0-split L2  ✅ Isolation`, s: 850, c: '94A3B8', ff: 'Courier New'
+                        }], { lnSpc: 115 }) +
+                        rect(0.4, 5.2, 12.5, 1.5, bg2) +
+                        txBox(0.6, 5.3, 12.1, 1.3, [
+                            { t: 'LARP\'s advantage: ', b: true, s: 1100, c: 'FFFFFF' },
+                            { t: 'At level 1, LARP finds the same dominant-fluid split as RMA. But at level 2, the DP enumeration discovers a zero-split partition {x₃,x₄} that RMA\'s greedy approach misses. The 2-level lookahead confirms this cascades cleanly, yielding fewer total splits while maintaining high maxL.', s: 1000, c: '94A3B8' }
+                        ], { lnSpc: 130 })
+                    ));
+
+                    // S10: SYSTEM ARCH
+                    slides.push(makeSlide(bg,
+                        txBox(0.6, 0.3, 12, 0.6, [{ t: '🏗️ System Architecture & Interactive App', s: 2200, b: true, c: 'FFFFFF' }]) +
+                        txBox(0.6, 0.85, 12, 0.3, [{ t: 'React + Vite application with 5-algorithm visualization (~800 LOC)', s: 1200, c: '06B6D4' }]) +
+                        rect(0.6, 1.3, 5.8, 2.8, bg2) +
+                        txBox(0.8, 1.4, 5.4, 2.6, [
+                            { t: 'App Features:\n', b: true, s: 1200, c: 'FFFFFF' },
+                            { t: '• Sidebar nav — RMA, BS, AP-DP, LARP, ILP, Compare\n• Interactive SVG tree — pan, zoom, drag\n• Color-coded by fluid with ratio bars\n• Configurable ratios + depth slider (2–14)\n• Real-time metrics display\n• 5-way comparison with bar charts + winner table', s: 1000, c: '94A3B8' }
+                        ], { lnSpc: 130 }) +
+                        rect(6.9, 1.3, 5.8, 2.8, bg2) +
+                        txBox(7.1, 1.4, 5.4, 2.6, [
+                            { t: 'Code Structure (App.jsx):\n', b: true, s: 1100, c: 'FFFFFF' },
+                            {
+                                t:
+                                    `├─ ratioApprox()    ratio → 2ᵈ
+├─ buildRMA()       Algorithm 4
+├─ buildBSTree()    Bit-scanning
+├─ buildAPDP()      Multi-strategy DP
+├─ buildLARP()      LARP v2 (ours)
+├─ buildILP()       Pareto-optimal DP
+├─ TreeView         SVG pan/zoom
+├─ AlgoPage         Single algo view
+└─ ComparePage      5-way comparison`, s: 900, c: '22C55E', ff: 'Courier New'
+                            }
+                        ], { lnSpc: 115 }) +
+                        rect(0.6, 4.4, 12, 2.3, bg2) +
+                        txBox(0.8, 4.5, 11.6, 2, [
+                            { t: 'Benchmark Configuration:\n', b: true, s: 1200, c: 'FFFFFF' },
+                            { t: '• 100 randomized target ratios  •  2 to 15 fluids per test  •  Depth d = 8 (L = 256)\n• 7 metrics measured: m, d, p, leaves, splits, l, maxL\n• All 5 algorithms run on identical inputs for fair comparison\n• Results exported to benchmark_results.csv for analysis', s: 1050, c: '94A3B8' }
+                        ], { lnSpc: 135 })
+                    ));
+
+                    // S11: BENCHMARK TABLE
+                    slides.push(makeSlide(bg,
+                        txBox(0.6, 0.3, 12, 0.6, [{ t: '📊 Benchmark Results — 100 Iterations', s: 2400, b: true, c: 'FFFFFF' }]) +
+                        txBox(0.6, 0.85, 12, 0.3, [{ t: 'Average performance (d=8, 2–15 fluids, randomized ratios)', s: 1200, c: '06B6D4' }]) +
+                        // Table header
+                        rect(0.6, 1.3, 12, 0.4, '334155') +
+                        txBox(0.6, 1.32, 1.8, 0.35, [{ t: 'Algorithm', b: true, s: 1050, c: 'FFFFFF' }]) +
+                        txBox(2.4, 1.32, 1.5, 0.35, [{ t: 'm (Mixes)', b: true, s: 1000, c: 'FFFFFF' }], { algn: 'ctr' }) +
+                        txBox(3.9, 1.32, 1.2, 0.35, [{ t: 'd', b: true, s: 1000, c: 'FFFFFF' }], { algn: 'ctr' }) +
+                        txBox(5.1, 1.32, 1.2, 0.35, [{ t: 'p (‖)', b: true, s: 1000, c: 'FFFFFF' }], { algn: 'ctr' }) +
+                        txBox(6.3, 1.32, 1.3, 0.35, [{ t: 'Leaves', b: true, s: 1000, c: 'FFFFFF' }], { algn: 'ctr' }) +
+                        txBox(7.6, 1.32, 1.3, 0.35, [{ t: 'Splits', b: true, s: 1000, c: 'FFFFFF' }], { algn: 'ctr' }) +
+                        txBox(8.9, 1.32, 1.5, 0.35, [{ t: 'l (Dil)', b: true, s: 1000, c: 'FFFFFF' }], { algn: 'ctr' }) +
+                        txBox(10.4, 1.32, 1.5, 0.35, [{ t: 'maxL', b: true, s: 1000, c: 'FFFFFF' }], { algn: 'ctr' }) +
+                        // Rows
+                        [['RMA', 'EF4444', 27.59, 7.97, 5.17, 28.59, 20.19, 20.69, 5.75],
+                        ['BS', 'F59E0B', 22.50, 7.97, 4.29, 23.50, 15.08, 10.99, 1.73],
+                        ['AP-DP', '8B5CF6', 28.02, 7.97, 5.25, 29.02, 20.60, 20.31, 5.69],
+                        ['LARP', '06B6D4', 25.57, 7.89, 4.76, 26.57, 18.29, 18.69, 5.72],
+                        ['ILP', '22C55E', 24.97, 7.97, 4.66, 25.97, 17.55, 17.22, 5.49]].map(([n, c, ...v], ri) => {
+                            const y = 1.72 + ri * 0.4;
+                            return rect(0.6, y, 12, 0.38, ri % 2 ? bg2 : '0F172A') +
+                                txBox(0.6, y + 0.02, 1.8, 0.34, [{ t: n, b: true, s: 1100, c: c }]) +
+                                v.map((x, ci) => txBox(2.4 + ci * 1.5 - (ci > 0 ? ci * 0.18 : 0), y + 0.02, [1.5, 1.2, 1.2, 1.3, 1.3, 1.5, 1.5][ci], 0.34, [{ t: String(x), s: 1100, c: 'E2E8F0' }], { algn: 'ctr' })).join('');
+                        }).join('') +
+                        // Analysis
+                        rect(0.6, 3.9, 12, 3, bg2) +
+                        txBox(0.8, 4.0, 11.6, 2.8, [
+                            { t: 'Key Observations:\n\n', b: true, s: 1300, c: 'FFFFFF' },
+                            { t: '• LARP achieves m=25.57 — ', s: 1100, c: '94A3B8' }, { t: '7.3% fewer mixes than RMA', b: true, s: 1100, c: '06B6D4' }, { t: ' while retaining maxL=5.72 (99.5% of RMA\'s 5.75)\n\n', s: 1100, c: '94A3B8' },
+                            { t: '• BS has lowest m=22.50 but ', s: 1100, c: '94A3B8' }, { t: 'catastrophic maxL=1.73', b: true, s: 1100, c: 'F59E0B' }, { t: ' and l=10.99 — unusable for physical chip routing\n\n', s: 1100, c: '94A3B8' },
+                            { t: '• ILP slightly better on m (24.97) and splits (17.55) but lower structural metrics\n\n', s: 1100, c: '94A3B8' },
+                            { t: '• LARP is the only algorithm where ', s: 1100, c: '94A3B8' }, { t: 'every metric is competitive', b: true, s: 1100, c: '06B6D4' }, { t: ' — the "Goldilocks" algorithm', s: 1100, c: '94A3B8' },
+                        ], { lnSpc: 110 })
+                    ));
+
+                    // S12: SCATTER
+                    slides.push(makeSlide(bg,
+                        txBox(0.6, 0.3, 12, 0.6, [{ t: '🎯 The "Goldilocks" Plot — Mixes vs maxL', s: 2200, b: true, c: 'FFFFFF' }]) +
+                        txBox(0.6, 0.85, 12, 0.3, [{ t: 'Lower mixes + Higher maxL = Better (top-left is optimal)', s: 1200, c: '06B6D4' }]) +
+                        // Plot area
+                        rect(1.5, 1.5, 9.5, 3.5, bg2) +
+                        txBox(1.5, 5.1, 9.5, 0.3, [{ t: 'Avg Mixes (m) →', s: 1000, c: '64748B' }], { algn: 'ctr' }) +
+                        txBox(0.3, 2.8, 1, 0.3, [{ t: 'maxL ↑', s: 1000, c: '64748B' }], { algn: 'ctr' }) +
+                        // Points (approximate positions)
+                        [{ n: 'RMA', m: 27.59, maxL: 5.75, c: 'EF4444', x: 7.8, y: 1.8 },
+                        { n: 'BS', m: 22.5, maxL: 1.73, c: 'F59E0B', x: 3.5, y: 4.2 },
+                        { n: 'AP-DP', m: 28.02, maxL: 5.69, c: '8B5CF6', x: 8.2, y: 1.85 },
+                        { n: 'LARP', m: 25.57, maxL: 5.72, c: '06B6D4', x: 6.1, y: 1.82 },
+                        { n: 'ILP', m: 24.97, maxL: 5.49, c: '22C55E', x: 5.6, y: 1.95 }
+                        ].map(p =>
+                            rect(p.x - 0.15, p.y - 0.15, 0.35, 0.35, p.c) +
+                            txBox(p.x - 0.5, p.y - 0.5, 1.2, 0.35, [{ t: p.n, b: true, s: 900, c: p.c }], { algn: 'ctr' })
+                        ).join('') +
+                        // Legend
+                        rect(0.6, 5.6, 3.8, 1, bg2) + txBox(0.8, 5.65, 3.4, 0.9, [{ t: 'RMA — Top Right\n', b: true, s: 1000, c: 'EF4444' }, { t: 'Great structure, too many mixes', s: 900, c: '94A3B8' }]) +
+                        rect(4.7, 5.6, 3.8, 1, bg2) + txBox(4.9, 5.65, 3.4, 0.9, [{ t: 'BS — Bottom Left\n', b: true, s: 1000, c: 'F59E0B' }, { t: 'Few mixes, destroys isolation', s: 900, c: '94A3B8' }]) +
+                        rect(8.8, 5.6, 3.8, 1, bg2) + txBox(9.0, 5.65, 3.4, 0.9, [{ t: 'LARP — Sweet Spot ✅\n', b: true, s: 1000, c: '06B6D4' }, { t: 'Near-BS mixes + near-RMA structure', s: 900, c: '94A3B8' }])
+                    ));
+
+                    // S13: RADAR
+                    slides.push(makeSlide(bg,
+                        txBox(0.6, 0.3, 12, 0.6, [{ t: '📡 Multi-Metric Radar Profile', s: 2400, b: true, c: 'FFFFFF' }]) +
+                        txBox(0.6, 0.85, 12, 0.3, [{ t: 'Normalized scores (0–100) — higher = better on each axis', s: 1200, c: '06B6D4' }]) +
+                        // Table
+                        rect(0.6, 1.3, 12, 0.35, '334155') +
+                        txBox(0.6, 1.32, 2.8, 0.3, [{ t: 'Metric', b: true, s: 1050, c: 'FFFFFF' }]) +
+                        txBox(3.4, 1.32, 2, 0.3, [{ t: 'RMA', b: true, s: 1050, c: 'EF4444' }], { algn: 'ctr' }) +
+                        txBox(5.4, 1.32, 2, 0.3, [{ t: 'BS', b: true, s: 1050, c: 'F59E0B' }], { algn: 'ctr' }) +
+                        txBox(7.4, 1.32, 2, 0.3, [{ t: 'LARP', b: true, s: 1050, c: '06B6D4' }], { algn: 'ctr' }) +
+                        txBox(9.4, 1.32, 2, 0.3, [{ t: 'ILP', b: true, s: 1050, c: '22C55E' }], { algn: 'ctr' }) +
+                        [['Low Mixes', 60, 95, 78, 82], ['Low Splits', 55, 90, 72, 78], ['High maxL', 96, 29, 95, 92], ['High l (Dilution)', 90, 48, 81, 75], ['Low Parallelism', 60, 88, 72, 75]].map(([m, ...v], i) => {
+                            const y = 1.68 + i * 0.35;
+                            return rect(0.6, y, 12, 0.33, i % 2 ? bg2 : '0F172A') +
+                                txBox(0.6, y + 0.02, 2.8, 0.3, [{ t: m, s: 1050, c: 'E2E8F0' }]) +
+                                v.map((x, j) => txBox(3.4 + j * 2, y + 0.02, 2, 0.3, [{ t: String(x), s: 1100, c: 'E2E8F0' }], { algn: 'ctr' })).join('');
+                        }).join('') +
+                        rect(0.6, 3.6, 12, 3.3, bg2) +
+                        txBox(0.8, 3.7, 11.6, 3, [
+                            { t: 'Key Takeaways:\n\n', b: true, s: 1300, c: 'FFFFFF' },
+                            { t: '🔴 RMA', b: true, s: 1100, c: 'EF4444' }, { t: ' — dominates High maxL/High l but collapses on Low Mixes (score: 60)\n\n', s: 1050, c: '94A3B8' },
+                            { t: '🟡 BS', b: true, s: 1100, c: 'F59E0B' }, { t: ' — dominates Low Mixes/Splits but collapses on High maxL (score: 29)\n\n', s: 1050, c: '94A3B8' },
+                            { t: '🔵 LARP', b: true, s: 1100, c: '06B6D4' }, { t: ' — the most balanced profile. No axis below 72. Every metric in top 60th percentile.\n\n', s: 1050, c: '94A3B8' },
+                            { t: '🟢 ILP', b: true, s: 1100, c: '22C55E' }, { t: ' — slightly better on mixes/splits but lower on structural metrics.', s: 1050, c: '94A3B8' },
+                        ], { lnSpc: 110 })
+                    ));
+
+                    // S14: CONCLUSION
+                    slides.push(makeSlide(bg,
+                        txBox(0.6, 0.3, 12, 0.6, [{ t: '🚀 Conclusion & Future Work', s: 2400, b: true, c: 'FFFFFF' }]) +
+                        rect(0.6, 1.0, 5.8, 3.5, bg2) +
+                        txBox(0.8, 1.1, 5.4, 3.3, [
+                            { t: '✅ Key Contributions:\n\n', b: true, s: 1200, c: 'FFFFFF' },
+                            { t: '• LARP v2 — first mixing tree algorithm with DP-exhaustive partition enumeration + 2-level lookahead\n\n• Achieves m=25.57 (7.3% ↓ vs RMA) while retaining maxL=5.72 (99.5% of RMA)\n\n• 5 partition strategies: 0-split, 1-split, 2-split, RMA-style, greedy\n\n• Interactive React visualization with 5-algorithm comparison\n\n• 100-iteration empirical evaluation proving Goldilocks positioning', s: 1000, c: '94A3B8' }
+                        ], { lnSpc: 115 }) +
+                        rect(6.9, 1.0, 5.8, 3.5, bg2) +
+                        txBox(7.1, 1.1, 5.4, 3.3, [
+                            { t: '🔮 Future Work:\n\n', b: true, s: 1200, c: 'FFFFFF' },
+                            { t: '• Multi-level lookahead (k=2,3) — diminishing returns analysis\n\n• ILP warm-start — use LARP as initial solution for exact solver\n\n• Droplet routing co-optimization — 2D routing penalty in scoring\n\n• Multi-target sample preparation — shared intermediates\n\n• Electrode degradation awareness — adaptive trees\n\n• RL-based approach — learned partition policy', s: 1000, c: '94A3B8' }
+                        ], { lnSpc: 115 }) +
+                        rect(0.6, 4.8, 12, 2, bg2) +
+                        txBox(0.8, 4.9, 11.6, 1.8, [
+                            { t: '📚 References:\n', b: true, s: 1100, c: 'FFFFFF' },
+                            { t: '[1] Kundu & Roy — IEEE DSD 2022   [2] Kundu et al. — ACM TODAES 2023\n[3] Liang et al. — IEEE TCAD 2020   [4] Li et al. — Springer 2019\n[5] Liang et al. — ICML 2021', s: 1000, c: '64748B' }
+                        ], { lnSpc: 130 })
+                    ));
+
+                    // S15: THANK YOU
+                    slides.push(makeSlide(bg,
+                        txBox(0, 1.2, 13.33, 0.8, [{ t: '🙏', s: 4000, c: 'FFFFFF' }], { algn: 'ctr' }) +
+                        txBox(0, 2.5, 13.33, 0.8, [{ t: 'Thank You!', s: 3600, b: true, c: 'FFFFFF' }], { algn: 'ctr' }) +
+                        txBox(0, 3.4, 13.33, 0.5, [{ t: 'Questions & Discussion', s: 1800, c: '06B6D4' }], { algn: 'ctr' }) +
+                        rect(5.5, 4.1, 2.3, 0.05, '06B6D4') +
+                        txBox(0, 4.4, 13.33, 1.5, [{ t: 'Dhananjay Singh\nB.Tech Project — Semester 8 • 2025–26\ngithub.com/dhananjaysingh10/BTP_SEM8_MEDA', s: 1200, c: '94A3B8' }], { algn: 'ctr', lnSpc: 150 })
+                    ));
+
+                    // ===== BUILD PPTX ZIP =====
+                    const zip = new JSZip();
+
+                    // [Content_Types].xml
+                    let ct = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>`;
+                    slides.forEach((_, i) => { ct += `<Override PartName="/ppt/slides/slide${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`; });
+                    ct += `<Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>`;
+                    ct += `</Types>`;
+                    zip.file('[Content_Types].xml', ct);
+
+                    // _rels/.rels
+                    zip.file('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/></Relationships>`);
+
+                    // ppt/presentation.xml
+                    let pres = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:sldMasterIdLst/><p:sldIdLst>`;
+                    slides.forEach((_, i) => { pres += `<p:sldId id="${256 + i}" r:id="rId${i + 2}"/>`; });
+                    pres += `</p:sldIdLst><p:sldSz cx="${W}" cy="${H}"/><p:notesSz cx="${H}" cy="${W}"/></p:presentation>`;
+                    zip.file('ppt/presentation.xml', pres);
+
+                    // ppt/_rels/presentation.xml.rels
+                    let prels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/>`;
+                    slides.forEach((_, i) => { prels += `<Relationship Id="rId${i + 2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${i + 1}.xml"/>`; });
+                    prels += `</Relationships>`;
+                    zip.file('ppt/_rels/presentation.xml.rels', prels);
+
+                    // Theme
+                    zip.file('ppt/theme/theme1.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Theme"><a:themeElements><a:clrScheme name="Dark"><a:dk1><a:srgbClr val="0F172A"/></a:dk1><a:lt1><a:srgbClr val="E2E8F0"/></a:lt1><a:dk2><a:srgbClr val="1E293B"/></a:dk2><a:lt2><a:srgbClr val="94A3B8"/></a:lt2><a:accent1><a:srgbClr val="6366F1"/></a:accent1><a:accent2><a:srgbClr val="06B6D4"/></a:accent2><a:accent3><a:srgbClr val="22C55E"/></a:accent3><a:accent4><a:srgbClr val="F59E0B"/></a:accent4><a:accent5><a:srgbClr val="EF4444"/></a:accent5><a:accent6><a:srgbClr val="8B5CF6"/></a:accent6><a:hlink><a:srgbClr val="06B6D4"/></a:hlink><a:folHlink><a:srgbClr val="8B5CF6"/></a:folHlink></a:clrScheme><a:fontScheme name="F"><a:majorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme><a:fmtScheme name="F"><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:fillStyleLst><a:lnStyleLst><a:ln w="9525"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln><a:ln w="9525"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln><a:ln w="9525"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:bgFillStyleLst></a:fmtScheme></a:themeElements></a:theme>`);
+
+                    // Slides + rels
+                    slides.forEach((xml, i) => {
+                        zip.file(`ppt/slides/slide${i + 1}.xml`, xml);
+                        zip.file(`ppt/slides/_rels/slide${i + 1}.xml.rels`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`);
+                    });
+
+                    zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' }).then(blob => {
+                        saveAs(blob, 'LARP_BTP_Sem8_MEDA_Presentation.pptx');
+                        st.textContent = '✅ Downloaded! Check your Downloads folder.'; st.style.color = '#22c55e';
+                        btn.disabled = false;
+                    });
+
+                } catch (e) { st.textContent = '❌ Error: ' + e.message; st.style.color = '#ef4444'; btn.disabled = false; console.error(e); }
+            }, 100);
+        }
+    </script>
+</body>
+
+</html>

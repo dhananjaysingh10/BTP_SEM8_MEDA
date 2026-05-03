@@ -1,0 +1,297 @@
+% Chapter 5: Experimental Results
+% Covers thesis.md §9
+
+All numbers in this chapter come from a single deterministic run of the full benchmark suite ($n = 323$) with beam-search width $K = 3$ for LARP and ILP, and the dilution-aware subtree cost ($w_s = 1000$, $w_d = 5$). Results are reproduced via \texttt{node bench.js} from a fresh clone.
+
+\textbf{A note on methodology.} An earlier iteration of this work used a 7-metric composite to rank algorithms per test. On audit, three sources of inflation were identified:
+\begin{enumerate}
+    \item $\text{leaves} = \text{mixes} + 1$ is mathematically locked in any binary tree, so leaves and mixes are the same metric counted twice.
+    \item \textit{splits} is highly correlated with \textit{mixes} in the test suite (per-test win-rate vectors are identical for both).
+    \item \textit{depth} is invariant across all algorithms because it is determined by the input.
+\end{enumerate}
+After correction, the headline is reported on \textbf{4 independent metrics}: $m$, $l$, $\text{maxL}$, $p$, supplemented with sole-vs-tied wins, per-rank distribution, and pairwise tie matrix.
+
+\section{Overall Averages}
+
+Table~\ref{tab:overall_avg} shows the overall average of each metric across all 323 tests.
+
+\begin{table}[H]
+\centering
+\caption{Overall average metrics across 323 tests. Best values in bold.}
+\label{tab:overall_avg}
+\begin{tabular}{|l|r|r|r|r|r|c|c|}
+\hline
+\textbf{Metric} & \textbf{RMA} & \textbf{BS} & \textbf{AP-DP} & \textbf{LARP} & \textbf{ILP} & \textbf{Dir.} & \textbf{Best} \\
+\hline
+Mixes ($m$) & 21.80 & \textbf{17.96} & 21.93 & 18.98 & 19.14 & $\downarrow$ & BS \\
+\hline
+Splits & 16.10 & \textbf{12.26} & 16.23 & 13.27 & 13.43 & $\downarrow$ & BS \\
+\hline
+Dilution ($l$) & \textbf{16.43} & 8.70 & 16.07 & 12.57 & 13.00 & $\uparrow$ & RMA \\
+\hline
+MaxDilution & 5.16 & 1.81 & \textbf{5.21} & 4.82 & 4.91 & $\uparrow$ & AP-DP \\
+\hline
+Leaves & 22.80 & \textbf{18.96} & 22.93 & 19.98 & 20.14 & $\downarrow$ & BS \\
+\hline
+Depth & 7.45 & 7.45 & 7.45 & 7.45 & 7.45 & -- & (tied) \\
+\hline
+Parallelism ($p$) & 4.06 & \textbf{3.56} & 4.03 & 3.64 & 3.66 & $\downarrow$ & BS \\
+\hline
+\end{tabular}
+\end{table}
+
+\section{Headline: Proposed vs Published Baselines}
+\label{sec:headline}
+
+Table~\ref{tab:headline} is the \textbf{single most important table} of this work. It reports each proposed algorithm's per-metric performance as a signed percentage change versus each published baseline. A checkmark (\checkmark) marks improvements in the desired direction.
+
+\begin{table}[H]
+\centering
+\caption{Percentage change of proposed algorithms vs.\ published baselines.}
+\label{tab:headline}
+\begin{tabular}{|l|r|r|r|r|r|r|}
+\hline
+\textbf{Comparison} & \textbf{Mixes} & \textbf{Splits} & \textbf{Leaves} & \textbf{Dilution} & \textbf{MaxDil.} & \textbf{Par.} \\
+\hline
+LARP vs RMA & $-$12.9\% \checkmark & $-$17.6\% \checkmark & $-$12.4\% \checkmark & $-$23.5\% & $-$6.6\% & $-$10.3\% \checkmark \\
+\hline
+LARP vs BS & +5.7\% & +8.2\% & +5.4\% & +44.5\% \checkmark & +166.3\% \checkmark & +2.2\% \\
+\hline
+ILP vs RMA & $-$12.2\% \checkmark & $-$16.6\% \checkmark & $-$11.7\% \checkmark & $-$20.9\% & $-$4.8\% & $-$9.9\% \checkmark \\
+\hline
+ILP vs BS & +6.6\% & +9.5\% & +6.2\% & +49.4\% \checkmark & +171.3\% \checkmark & +2.8\% \\
+\hline
+\end{tabular}
+\end{table}
+
+Key observations:
+\begin{itemize}
+    \item LARP and ILP \textbf{strictly improve over RMA} on size and parallelism (5 of 6 metrics) at the cost of dilution-chain length.
+    \item LARP and ILP \textbf{strictly improve over BS} on dilution structure (2 of 2 dilution metrics) at the cost of 6--10\% more mix operations.
+    \item Neither LARP nor ILP dominates either baseline; they occupy a \textbf{previously unfilled middle} of the splits-vs-dilution trade-off curve.
+\end{itemize}
+
+\section{Per-Test Rank Distribution}
+\label{sec:rank_dist}
+
+For each test, the algorithms are ranked by their composite score over the 4 independent metrics: mixes, dilution ($l$), maxL, parallelism. Table~\ref{tab:rank_dist} counts how often each algorithm placed at each rank.
+
+\begin{table}[H]
+\centering
+\caption{Per-test rank distribution across 323 tests (4-metric composite).}
+\label{tab:rank_dist}
+\begin{tabular}{|l|r|r|r|r|r|}
+\hline
+\textbf{Algorithm} & \textbf{1st} & \textbf{2nd} & \textbf{3rd} & \textbf{4th} & \textbf{5th} \\
+\hline
+RMA & 158 & 23 & 53 & 70 & 19 \\
+\hline
+BS & 2 & 66 & 17 & 79 & \textbf{159} \\
+\hline
+AP-DP & 34 & 52 & 111 & 53 & 73 \\
+\hline
+\textbf{LARP} & 92 & 92 & 61 & 73 & \textbf{5} \\
+\hline
+\textbf{ILP} & 37 & 90 & 81 & 48 & 67 \\
+\hline
+\end{tabular}
+\end{table}
+
+The qualitative story:
+\begin{itemize}
+    \item \textbf{RMA} is bimodal: 1st on 49\% of tests but last on 6\%.
+    \item \textbf{BS} is the most extreme: 1st on only 0.6\% but last on \textbf{49.2\%}.
+    \item \textbf{AP-DP} is consistently middle-of-the-pack.
+    \item \textbf{LARP} is the \textbf{most consistent algorithm}: ranked 1st-or-2nd on \textbf{57\%} of tests and last on only \textbf{1.5\%} (5/323).
+    \item \textbf{ILP} is similar to LARP, with slightly higher variance.
+\end{itemize}
+
+\section{Sole vs Tied Composite Wins}
+
+Table~\ref{tab:sole_tied} shows sole-best (only one algorithm at maximum) and tied-best (any algorithm at maximum) counts.
+
+\begin{table}[H]
+\centering
+\caption{Sole vs.\ tied composite wins (4-metric).}
+\label{tab:sole_tied}
+\begin{tabular}{|l|r|r|}
+\hline
+\textbf{Algorithm} & \textbf{Sole-best} & \textbf{Tied-best} \\
+\hline
+RMA & 22 (6.8\%) & 158 (48.9\%) \\
+\hline
+BS & 2 (0.6\%) & 66 (20.4\%) \\
+\hline
+AP-DP & 19 (5.9\%) & 130 (40.2\%) \\
+\hline
+\textbf{LARP} & 35 (10.8\%) & 235 (72.8\%) \\
+\hline
+\textbf{ILP} & 37 (11.5\%) & 240 (74.3\%) \\
+\hline
+\end{tabular}
+\end{table}
+
+On average, 2.57 algorithms are tied at the top per test.
+
+\section{Pairwise Composite-Tie Matrix}
+
+Table~\ref{tab:pairwise} shows how often each pair of algorithms produces indistinguishable trees on the 4-metric composite.
+
+\begin{table}[H]
+\centering
+\caption{Pairwise composite-tie counts (out of 323 tests).}
+\label{tab:pairwise}
+\begin{tabular}{|l|r|r|r|r|r|}
+\hline
+ & \textbf{RMA} & \textbf{BS} & \textbf{AP-DP} & \textbf{LARP} & \textbf{ILP} \\
+\hline
+\textbf{RMA} & --- & 117 & 104 & 138 & 141 \\
+\hline
+\textbf{BS} & 117 & --- & 118 & 65 & 69 \\
+\hline
+\textbf{AP-DP} & 104 & 118 & --- & 110 & 113 \\
+\hline
+\textbf{LARP} & 138 & 65 & 110 & --- & \textbf{226} \\
+\hline
+\textbf{ILP} & 141 & 69 & 113 & \textbf{226} & --- \\
+\hline
+\end{tabular}
+\end{table}
+
+The most important entry: \textbf{LARP--ILP = 226/323 (70\%)}. LARP and ILP produce identical-quality trees on 70\% of the test suite. This suggests both have reached the practical optimum on the explored candidate space.
+
+\section{Strict-Best on Splits}
+
+Splits is the primary design objective for LARP and ILP. Table~\ref{tab:splits_best} shows how often each algorithm achieves the best split count.
+
+\begin{table}[H]
+\centering
+\caption{Strict-best on splits (the design objective).}
+\label{tab:splits_best}
+\begin{tabular}{|l|r|r|}
+\hline
+\textbf{Algorithm} & \textbf{Sole-best} & \textbf{Tied-best} \\
+\hline
+RMA & 0 (0.0\%) & 113 (35.0\%) \\
+\hline
+\textbf{BS} & \textbf{125 (38.7\%)} & \textbf{323 (100.0\%)} \\
+\hline
+AP-DP & 0 (0.0\%) & 78 (24.1\%) \\
+\hline
+LARP & 0 (0.0\%) & 192 (59.4\%) \\
+\hline
+ILP & 0 (0.0\%) & 182 (56.3\%) \\
+\hline
+\end{tabular}
+\end{table}
+
+\textbf{Critical finding:} BS is at-least-tied for fewest splits on every single test (100\%), and uniquely best on 38.7\%. No proposed algorithm is ever strictly fewer-splits than BS. LARP and ILP can only \textbf{match} BS, on 59.4\% and 56.3\% of tests respectively. However, BS is catastrophic on dilution (1.81 average vs.\ 12+ for the others).
+
+\section{Per-Metric Win Counts}
+
+Table~\ref{tab:per_metric_wins} shows the percentage of tests on which each algorithm achieves the best value for each metric (ties counted).
+
+\begin{table}[H]
+\centering
+\caption{Per-metric win rates (\%, ties counted).}
+\label{tab:per_metric_wins}
+\begin{tabular}{|l|r|r|r|r|r|}
+\hline
+\textbf{Metric} & \textbf{RMA} & \textbf{BS} & \textbf{AP-DP} & \textbf{LARP} & \textbf{ILP} \\
+\hline
+Mixes & 35 & \textbf{100} & 24 & 59 & 56 \\
+\hline
+Splits & 35 & \textbf{100} & 24 & 59 & 56 \\
+\hline
+Dilution ($l$) & \textbf{63} & 18 & 68 & 27 & 28 \\
+\hline
+MaxDilution & 85 & 17 & \textbf{90} & 67 & 70 \\
+\hline
+Leaves & 35 & \textbf{100} & 24 & 59 & 56 \\
+\hline
+Parallelism & 68 & \textbf{100} & 64 & \textbf{92} & 91 \\
+\hline
+\end{tabular}
+\end{table}
+
+Note: the win-rate vectors for Mixes, Splits, and Leaves are \textit{identical}---direct empirical confirmation of the metric correlation.
+
+\section{Final Scoreboard}
+
+For completeness, the original 7-metric scoreboard (1st = 6 pts, 2nd = 4, \ldots, with ties sharing the higher position's points):
+
+\begin{center}
+\begin{tabular}{|c|l|r|}
+\hline
+\textbf{Rank} & \textbf{Algorithm} & \textbf{Points} \\
+\hline
+1 & BS & 32 \\
+\hline
+2 & LARP & 26 \\
+\hline
+3 & ILP & 24 \\
+\hline
+4 & RMA & 23 \\
+\hline
+5 & AP-DP & 21 \\
+\hline
+\end{tabular}
+\end{center}
+
+This scoreboard places BS first because it dominates the three correlated size metrics. The 4-metric per-test rank distribution in Section~\ref{sec:rank_dist} tells a more honest story---BS ranks last in 49\% of tests on the de-correlated composite.
+
+\section{Per-Algorithm Timing}
+
+Table~\ref{tab:timing} reports wall-time statistics across all 323 tests.
+
+\begin{table}[H]
+\centering
+\caption{Per-algorithm timing ($n = 323$ tests).}
+\label{tab:timing}
+\begin{tabular}{|l|r|r|r|}
+\hline
+\textbf{Algorithm} & \textbf{Total (ms)} & \textbf{Avg (ms)} & \textbf{Max (ms)} \\
+\hline
+RMA & 33 & 0.10 & 2 \\
+\hline
+BS & 9 & 0.03 & 1 \\
+\hline
+AP-DP & 136 & 0.42 & 3 \\
+\hline
+LARP & 2,288 & 7.08 & 62 \\
+\hline
+ILP & \textbf{24,403} & \textbf{75.55} & \textbf{4,427} \\
+\hline
+\end{tabular}
+\end{table}
+
+ILP's worst-case 4.4-second tail occurs on the largest stress test (33 fluids, depth 12). For interactive UI use on inputs $> 25$ fluids, this is borderline.
+
+\section{Phase-B Impact: Beam Search vs Greedy}
+
+Table~\ref{tab:beam_impact} shows the effect of beam-search augmentation ($K = 3$) compared to greedy ($K = 1$) on the same algorithm.
+
+\begin{table}[H]
+\centering
+\caption{Impact of beam search (Phase B) on LARP and ILP.}
+\label{tab:beam_impact}
+\begin{tabular}{|l|r|r|}
+\hline
+\textbf{Metric} & \textbf{LARP: beam vs.\ greedy} & \textbf{ILP: beam vs.\ greedy} \\
+\hline
+Mixes & $-$2.03 ($-$9.7\%) & $-$1.32 ($-$6.4\%) \\
+\hline
+Splits & $-$2.17 ($-$14.0\%) & $-$1.33 ($-$9.0\%) \\
+\hline
+Leaves & $-$2.03 & $-$1.32 \\
+\hline
+Parallelism & $-$0.22 & $-$0.14 \\
+\hline
+Dilution ($l$) & +3.22 (regression) & +1.56 (regression) \\
+\hline
+MaxDilution & +0.35 & +0.19 \\
+\hline
+\end{tabular}
+\end{table}
+
+Beam-augmented LARP and ILP \textbf{gain 9--14\% on the design objective} (splits/mixes) and \textbf{lose 13--25\% on dilution chains}. The trade-off is documented as an improvement on the stated objective, not a uniform improvement on every metric.

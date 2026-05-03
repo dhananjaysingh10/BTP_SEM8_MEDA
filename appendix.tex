@@ -1,0 +1,36 @@
+% Appendix: Code Attachments
+
+The complete source code for this project is available in the project repository. The key files are:
+
+\section{Algorithm Library: \texttt{benchmark.js}}
+
+This file contains the implementations of all five mixing-tree construction algorithms (RMA, BS, AP-DP, LARP, ILP), the beam-search and memoization meta-framework, all metric calculators, and the ratio-approximation pre-processor. It is approximately 1,600 lines of JavaScript.
+
+\section{Benchmark Runner: \texttt{bench.js}}
+
+The experiment driver that generates the stratified test suite (323 cases), executes all algorithms, computes per-test and aggregate statistics, and produces the output files (\texttt{benchmark\_latest.json}, \texttt{benchmark\_detailed.csv}).
+
+\section{Visualization Tool: \texttt{src/App.jsx}}
+
+A Vite + React 18 single-page application that provides interactive mixing-tree visualization with side-by-side algorithm comparison, color-coded fluid leaves, and real-time metric display.
+
+\section{How to Reproduce}
+
+\begin{lstlisting}[language=bash, caption={Reproducing the benchmark results.}]
+# Install dependencies
+npm install
+
+# Run the full benchmark suite
+node bench.js
+
+# Output files:
+#   benchmark_latest.json  (full results)
+#   benchmark_detailed.csv (per-test rows)
+#   Terminal dashboard     (summary tables)
+
+# Run the visualization tool
+npm run dev
+# Open http://localhost:5173 in a browser
+\end{lstlisting}
+
+All results are deterministic (fixed PRNG seed). Running \texttt{node bench.js} on any machine will produce identical test cases and identical algorithm outputs.

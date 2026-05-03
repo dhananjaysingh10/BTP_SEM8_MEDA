@@ -1,0 +1,108 @@
+% Chapter 4: Benchmarking Framework and Visualization Tool
+% Covers thesis.md §7 (Benchmarking Framework) and §8 (Visualization Tool)
+
+This chapter describes the benchmarking framework used to evaluate the five algorithms and the web-based visualization tool developed for interactive tree exploration.
+
+\section{Benchmarking Goals}
+
+The goal is a reproducible, deterministic, multi-metric benchmark that exposes the relative strengths of each algorithm across a stratified set of input distributions covering the practically interesting cases for DMFB sample preparation.
+
+\section{Architecture}
+
+The benchmarking system consists of two modules:
+
+\begin{itemize}
+    \item \textbf{\texttt{benchmark.js}} --- The algorithm library containing all five algorithm implementations, the metric calculators (\texttt{cntM}, \texttt{cntSplits}, \texttt{dL}, \texttt{maxDL}, \texttt{cntL}, \texttt{mxP}), the tree builder dispatch (\texttt{buildTree}), and the ratio-approximation pre-processor (\texttt{ratioApprox}). This module is also consumed by the React visualization UI.
+    
+    \item \textbf{\texttt{bench.js}} --- The experiment driver that seeds a deterministic PRNG, generates the stratified test suite, runs every algorithm on every test, computes per-test statistics, aggregates per-category and overall results, prints multi-table dashboards, and persists output files.
+\end{itemize}
+
+\section{Stratified Test Suite}
+
+The benchmark suite contains \textbf{323 test cases} organized into 10 categories, as shown in Table~\ref{tab:test_suite}.
+
+\begin{table}[H]
+\centering
+\caption{Stratified test suite: 323 cases across 10 categories.}
+\label{tab:test_suite}
+\begin{tabular}{|l|r|l|l|p{5.5cm}|}
+\hline
+\textbf{Category} & \textbf{$n$} & \textbf{Fluids} & \textbf{Depth} & \textbf{Purpose} \\
+\hline
+\texttt{paper} & 9 & as published & as published & Reproduce literature examples \\
+\hline
+\texttt{edge} & 12 & 2--4 & 3--5 & Small/edge-case ratios \\
+\hline
+\texttt{stress} & 2 & 30+ & 12 & Largest tractable inputs \\
+\hline
+\texttt{rand-few} & 40 & 2--4 & 4--8 & Random, small fluid count \\
+\hline
+\texttt{rand-med} & 80 & 5--8 & 6--9 & Random, mid-range count \\
+\hline
+\texttt{rand-many} & 60 & 10--18 & 7--10 & Random, many fluids \\
+\hline
+\texttt{rand-skew} & 40 & 5--8 & 6--9 & Strongly asymmetric counts \\
+\hline
+\texttt{rand-equal} & 40 & 5--8 & 6--9 & All counts within $\pm 1$ \\
+\hline
+\texttt{rand-deep} & 20 & 8--12 & 10--12 & Deep trees, high-volume \\
+\hline
+\texttt{rand-shallow} & 20 & 3--5 & 4--6 & Shallow trees \\
+\hline
+\end{tabular}
+\end{table}
+
+\section{Metrics Aggregation}
+
+For each test $\times$ algorithm combination, the following are computed:
+
+\begin{itemize}
+    \item Per-test absolute values for all 7 metrics.
+    \item Per-test ``win'' indicators (does this algorithm equal the best on this metric?).
+    \item Per-test composite-best (lowest sum of normalized metric ranks).
+\end{itemize}
+
+Aggregations include:
+
+\begin{itemize}
+    \item \textbf{Per-category:} Mean and median of each metric per algorithm.
+    \item \textbf{Overall:} Same, plus win counts per metric.
+    \item \textbf{Final scoreboard:} Rank-based points across all metrics, with tied-rank-aware points (multiple algorithms tied for $k$-th place all receive the $k$-th-place points; later positions skip).
+\end{itemize}
+
+\section{Reproducibility}
+
+\begin{itemize}
+    \item Deterministic PRNG seed (constant) ensures the same suite every run.
+    \item Per-run output: \texttt{benchmark\_latest.json} (full results), \texttt{benchmark\_detailed.csv} (per-test rows), and an in-terminal dashboard.
+    \item Diff-versus-baseline mode prints delta indicators when a previous baseline file is present, enabling fast iteration during development.
+\end{itemize}
+
+\section{Per-Algorithm Timing}
+
+The benchmark records $\{\text{total}, \text{avg}, \text{max}\}$ wall-time per algorithm, reported as a separate table. This is used to surface ILP's worst-case 4.4-second tail on stress tests---a concern for interactive use.
+
+\section{Visualization Tool}
+
+A web-based visualization tool was developed for interactive tree exploration and algorithm comparison.
+
+\subsection{Technology Stack}
+
+\begin{itemize}
+    \item \textbf{Vite + React 18} as the build tool and framework.
+    \item \textbf{Plain Canvas} for tree rendering (no charting library dependency).
+    \item \textbf{Single-file \texttt{App.jsx}} containing the algorithm library (mirrored from \texttt{benchmark.js}) plus the UI.
+\end{itemize}
+
+\subsection{Features}
+
+\begin{itemize}
+    \item Input panel for ratios, depth, and algorithm selection (RMA / BS / AP-DP / LARP / ILP).
+    \item On-input recomputation of all five trees.
+    \item Side-by-side comparison view with all metrics displayed beneath each tree.
+    \item Tree layout (\texttt{layoutTree}) computes node positions so internal nodes are horizontally centered above their children.
+    \item Color-coded leaves per fluid for visual distinguishability.
+    \item Algorithm-info panels with short descriptions and references.
+\end{itemize}
+
+The UI is intentionally lean---its purpose is demonstration and debugging, not a research artifact in itself.

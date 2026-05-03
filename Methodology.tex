@@ -1,0 +1,325 @@
+% Chapter 3: Proposed Methodology
+% Covers thesis.md §5 (Algorithms Implemented) and §6 (Beam-Search Meta-Framework)
+
+This chapter presents the five algorithms implemented in this work---two classical baselines (RMA, BS) and three proposed algorithms (AP-DP, LARP, ILP)---followed by the beam-search with memoization meta-framework that augments the proposed algorithms.
+
+\section{Algorithm Overview}
+
+Five algorithms are implemented. RMA~\cite{roy2010layout} and BS~\cite{thies_bs} serve as classical baselines representing the two extremes of the splits-versus-dilution trade-off. Three new algorithms---AP-DP, LARP, and ILP---are proposed in this work to fill the gap between these extremes.
+
+\section{RMA --- Ratioed Mixing Algorithm (Baseline)}
+\label{sec:rma_algo}
+
+RMA is a top-down greedy algorithm that builds the mixing tree by always assigning the \textbf{dominant fluid} (highest count) first.
+
+\subsection{Pseudocode}
+
+\begin{algorithmic}[1]
+\STATE \textbf{function} RMA($P$, $L$)
+\IF{$|P| \leq 1$ or $L \leq 1$}
+    \RETURN Leaf(majority fluid of $P$)
+\ENDIF
+\STATE Sort fluids of $P$ by count descending
+\STATE Let $U$ be the largest-count fluid; $a_U = \text{count}(U)$
+\IF{$a_U \geq L/2$}
+    \STATE $P_1 \gets \{U: L/2\}$
+    \STATE $P_2 \gets P$ with $U$ decremented by $L/2$
+\ELSE
+    \STATE $P_1 \gets \{U: a_U\}$, \quad $E \gets L/2 - a_U$
+    \IF{some single fluid in $P \setminus \{U\}$ has count $= E$}
+        \STATE Move that fluid into $P_1$
+    \ELSIF{a subset of $P \setminus \{U\}$ of size $\leq |P|/2$ sums to $E$}
+        \STATE Move that subset into $P_1$
+    \ELSE
+        \STATE Take next-largest fluid $V$; put $\min(E, \text{count}(V))$ of $V$ in $P_1$
+    \ENDIF
+\ENDIF
+\RETURN Mix(RMA($P_1$, $L/2$), RMA($P_2$, $L/2$))
+\end{algorithmic}
+
+\subsection{Complexity}
+
+$O(n \log n)$ per node for sorting; $O(n^2)$ worst-case for the subset-sum check. Total tree-construction cost: $O(d \cdot n^2)$ where $d$ is the depth.
+
+\subsection{Behavior}
+
+Deterministic, single-candidate-per-node. Always builds around the dominant fluid. This produces \textbf{long dilution chains} at the cost of unnecessary mixes when the dominant fluid is much smaller than $L/2$.
+
+\section{BS --- Bit-Scanning (Baseline)}
+\label{sec:bs_algo}
+
+BS is a bottom-up algorithm that reads the binary representation of each fluid count.
+
+\subsection{Pseudocode}
+
+\begin{algorithmic}[1]
+\STATE \textbf{function} BS($P$, $d$)
+\FOR{each bit $b \in [0, d-1]$}
+    \STATE $\text{lvIn}[b] \gets \{f : \text{bit } b \text{ of count}(f) = 1\}$
+\ENDFOR
+\STATE $\text{prev} \gets []$
+\FOR{$b = 0$ to $d-1$}
+    \STATE $\text{items} \gets \text{prev} \cup \{\text{Leaf}(f) : f \in \text{lvIn}[b]\}$
+    \STATE Pair adjacent items, replacing each pair $(x, y)$ with $\text{Mix}(x, y)$
+    \STATE $\text{prev} \gets$ resulting list
+\ENDFOR
+\RETURN $\text{prev}[0]$
+\end{algorithmic}
+
+\subsection{Complexity}
+
+$O(d \cdot n)$ total---each fluid contributes $O(\log \text{count})$ leaves, each participating in $O(d)$ mix steps.
+
+\subsection{Behavior}
+
+Reads the binary representation of each fluid count and ``broadcasts'' each bit into the appropriate tree level. Trees are typically deeper than RMA's, with higher fluid scattering but the \textbf{fewest mixes}.
+
+\section{AP-DP --- Adaptive Partitioning via Dynamic Programming [Proposed]}
+\label{sec:apdp_algo}
+
+\subsection{Motivation}
+
+RMA's myopia (only one candidate per node) and BS's lack of split-awareness motivate a \textbf{multi-strategy} approach: rather than pick one rule, generate many candidate partitions per level and pick the best by a scoring function. AP-DP is the simplest realization of this idea.
+
+\subsection{Five Candidate Generation Strategies}
+
+AP-DP generates candidates using five disjoint heuristics:
+
+\begin{enumerate}
+    \item[\textbf{A.}] \textbf{Exact whole-fluid subset sum.} Enumerate all subsets of the fluids whose counts sum exactly to $L/2$. These are zero-split partitions. Implementation uses bit-mask DP for up to 15 fluids.
+    
+    \item[\textbf{B.}] \textbf{Closest-sum + single fluid split.} When no exact subset exists, find the closest-achievable sum $S < L/2$ via DP, then split exactly $(L/2 - S)$ units off one fluid to close the gap.
+    
+    \item[\textbf{C.}] \textbf{RMA-style dominant fluid.} If any fluid has count $\geq L/2$, fill one child entirely with that fluid (truncated at $L/2$).
+    
+    \item[\textbf{D.}] \textbf{Greedy balanced.} Walk fluids in decreasing-count order, placing each in whichever side currently has room.
+    
+    \item[\textbf{E.}] \textbf{Reverse greedy.} Same as D, but fill the second side first.
+\end{enumerate}
+
+After generation, candidates are \textbf{deduplicated} (mirror images and exact duplicates removed).
+
+\subsection{Scoring Function}
+
+The scoring function $\text{scorePartitionV3}(P_1, P_2, L)$ is:
+
+\begin{equation}
+\text{score} = \text{splits} \times 1000 - \text{dilutionBonus} \times 50 + \text{totalDistinct} \times 10 + \text{minFluids} \times 5
+\end{equation}
+
+where:
+\begin{itemize}
+    \item \textit{splits} is the number of fluids appearing in both $P_1$ and $P_2$ (heavy penalty)
+    \item \textit{dilutionBonus} counts sides where the dominant fluid exceeds 50\% of that side's volume
+    \item \textit{totalDistinct} $= |\text{fluids}(P_1)| + |\text{fluids}(P_2)|$
+    \item \textit{minFluids} $= \min(|\text{fluids}(P_1)|, |\text{fluids}(P_2)|)$
+\end{itemize}
+
+Lower score wins.
+
+\subsection{Complexity}
+
+$O(2^n + n \cdot L)$ per node in the worst case. Practical bounds keep $n \leq 15$ for the bit-mask phase.
+
+\subsection{Behavior}
+
+AP-DP is \textbf{myopic}: it scores each partition only on its immediate quality. Its candidate diversity is broader than RMA's, but it cannot foresee that today's ``good'' partition causes tomorrow's bad one.
+
+\section{LARP --- Lookahead-Augmented Recursive Partitioning [Proposed]}
+\label{sec:larp_algo}
+
+\subsection{Motivation}
+
+AP-DP's local scoring is its principal weakness: a partition that looks good locally may force large costs at the \textit{next} level. LARP addresses this by \textbf{augmenting the score with a one-level lookahead}: the score of $(P_1, P_2)$ includes a quick estimate of how much each child will cost when \textit{it} is partitioned.
+
+LARP also broadens candidate generation by \textbf{enumerating all subset sums via DP} and considering all single-split candidates for each closest sum.
+
+\subsection{Pseudocode}
+
+\begin{algorithmic}[1]
+\STATE \textbf{function} LARP($P$, $L$)
+\IF{$|P| = 1$ or $L \leq 1$}
+    \RETURN Leaf
+\ENDIF
+\STATE \textit{// Step 1: Comprehensive candidate generation}
+\STATE $\text{zero\_split} \gets \text{larpEnumZeroSplit}(P, L)$
+\STATE $\text{single\_split} \gets \text{larpEnumSingleSplit}(P, L)$
+\STATE $\text{rma\_style} \gets \text{larpEnumDominant}(P, L)$
+\STATE $\text{candidates} \gets \text{dedup}(\text{zero\_split} \cup \text{single\_split} \cup \text{rma\_style})$
+\STATE \textit{// Step 2: Lookahead-augmented scoring}
+\FOR{each $(P_1, P_2)$ in candidates}
+    \STATE $\text{immediate} \gets \text{splits}(P_1, P_2) \times 20 + \text{minDistinct}(P_1, P_2) \times 3$
+    \STATE $\text{quick}_1 \gets \text{larpQuickScore}(P_1, L/2)$
+    \STATE $\text{quick}_2 \gets \text{larpQuickScore}(P_2, L/2)$
+    \STATE $\text{lookahead} \gets (\text{quick}_1 + \text{quick}_2) \times 8$
+    \STATE $\text{balance} \gets ||\text{fluids}(P_1)| - |\text{fluids}(P_2)||$
+    \STATE $\text{score} \gets \text{immediate} + \text{lookahead} + 2 \times \text{balance}$
+\ENDFOR
+\STATE $\text{best} \gets \arg\min(\text{candidates}, \text{score})$
+\RETURN Mix(LARP($\text{best}.P_1$, $L/2$), LARP($\text{best}.P_2$, $L/2$))
+\end{algorithmic}
+
+\subsection{The Look-Ahead Estimator: larpQuickScore}
+
+A lightweight DP that asks only: \textit{can the next level reach a zero-split partition?}
+
+\begin{algorithmic}[1]
+\STATE $\text{target} \gets L/2$
+\STATE $\text{dp}[0] \gets \text{true}$
+\FOR{each fluid with count $v$}
+    \FOR{$s = \text{target}$ downto $v$}
+        \STATE $\text{dp}[s] \gets \text{dp}[s] \lor \text{dp}[s - v]$
+    \ENDFOR
+\ENDFOR
+\RETURN $0$ if $\text{dp}[\text{target}]$ else $1$
+\end{algorithmic}
+
+Time: $O(n \cdot L)$ per call, called twice per candidate.
+
+\subsection{Complexity}
+
+$O(d \cdot (n \cdot L + C \cdot n \cdot L/4))$ where $C$ is the number of candidates per node. In practice runs in $\leq 60$~ms per tree on our benchmark.
+
+\subsection{Behavior}
+
+LARP's lookahead correctly identifies that \textit{zero-split-now with zero-split-next} is generally better than \textit{zero-split-now alone}. Empirically it produces the lowest split counts of all proposed algorithms.
+
+\section{ILP --- Integer-Allocation DP Heuristic [Proposed]}
+\label{sec:ilp_algo}
+
+\textbf{Naming note:} ``ILP'' here refers to the \textbf{integer-allocation framing}, not to a solver-based integer linear program. There is no LP relaxation, no simplex, no branch-and-bound, no commercial solver. The algorithm is a dynamic-programming heuristic that prunes its search using a non-domination rule on (splits, allocation) states. See Section~\ref{sec:ilp_naming} for the full clarification.
+
+\subsection{Motivation}
+
+LARP's candidate generation, while comprehensive, is procedural. ILP takes a different stance: \textbf{set up the problem as a DP over allocation decisions and track all non-dominated (splits, allocation) states}. This generalizes both zero-split and multi-split candidates uniformly.
+
+\subsection{Algorithm Phases}
+
+\begin{enumerate}
+    \item \textbf{Phase 1 --- Integer-allocation DP.} State $\text{dp}[s]$ is a list of $\{\text{splits}, \text{alloc}[]\}$ pairs reaching exact running sum $s$. For each item with count $v$, try every take $t \in [0, v]$. A take with $0 < t < v$ adds 1 to the split count. Non-domination is enforced with a cap of $\text{ALLOC\_CAP} = 32$ states per sum.
+    
+    \item \textbf{Phase 2 --- Collect candidates} with $s = L/2$.
+    
+    \item \textbf{Phase 3 --- RMA-style fallback.} For each fluid with count $\geq L/2$, generate the dominant-fluid partition.
+    
+    \item \textbf{Phase 4 --- Greedy fallback} for inputs where Phases 1--3 yield no valid partition.
+    
+    \item \textbf{Phase 5 --- Deduplicate} using canonical sorted-pair keys.
+    
+    \item \textbf{Phase 6 --- Score and select} using $\text{ilpScoreAllocation}$, which includes a 1-level lookahead penalty and rewards for dilution potential and pure isolation.
+\end{enumerate}
+
+\subsection{Scoring Function}
+
+\begin{equation}
+\begin{split}
+\text{score} = {} & \text{splits} \times 1000 + (n_1 + n_2) \times 10 \\
+& - 50 \cdot \mathbb{1}[n_1 \leq 2] - 50 \cdot \mathbb{1}[n_2 \leq 2] \\
+& - 30 \cdot \mathbb{1}[n_1 = 1] - 30 \cdot \mathbb{1}[n_2 = 1] \\
+& - 20 \cdot \mathbb{1}[\text{dominant} \geq 50\%] \\
+& + (\text{la}_1.\text{splits} + \text{la}_2.\text{splits}) \times 100 \\
+& - 15 \cdot \mathbb{1}[\text{next level zero-split reachable}]
+\end{split}
+\end{equation}
+
+where $n_1, n_2$ are the distinct fluid counts in each child.
+
+\subsection{Complexity}
+
+$O(n \cdot (L/2) \cdot \text{ALLOC\_CAP} \cdot v_{\max})$ per node---quadratic in volume, which is the bottleneck. On the largest stress tests (33 fluids, depth 12), this can take up to 4.4~s per test.
+
+\subsection{Behavior}
+
+ILP explores a strictly larger candidate space than LARP. Empirically, ILP's metrics are very close to LARP's---they produce identical trees on 70\% of tests (see Chapter~5).
+
+\section{Algorithm Comparison}
+
+Table~\ref{tab:algo_comparison} summarizes the key differences among the five algorithms.
+
+\begin{table}[H]
+\centering
+\caption{Comparison of the five implemented algorithms.}
+\label{tab:algo_comparison}
+\begin{tabular}{|l|c|c|c|c|c|}
+\hline
+\textbf{Aspect} & \textbf{RMA} & \textbf{BS} & \textbf{AP-DP} & \textbf{LARP} & \textbf{ILP} \\
+\hline
+Direction & Top-down & Bottom-up & Top-down & Top-down & Top-down \\
+\hline
+Candidates/node & 1 & Fixed & $\leq 30$ & All subsets & All DP states \\
+\hline
+Lookahead & None & None & None & 1-level & 1-level \\
+\hline
+Primary obj. & Dilution & Min mixes & Splits & Splits & Splits \\
+\hline
+Worst-case & $O(d n^2)$ & $O(dn)$ & $O(2^n + nL)$ & $O(dnL)$ & $O(dnL \cdot C)$ \\
+\hline
+Origin & \cite{roy2010layout} & \cite{thies_bs} & \textbf{Ours} & \textbf{Ours} & \textbf{Ours} \\
+\hline
+\end{tabular}
+\end{table}
+
+\section{The Beam-Search + Memoization Meta-Framework}
+\label{sec:beam_search}
+
+This is a \textbf{meta-algorithm} that augments any partitioning-based mixing-tree algorithm. It applies to AP-DP, LARP, and ILP, leaving RMA and BS unchanged because their candidate-generation models are not partition-pick-driven.
+
+\subsection{Motivation}
+
+The base algorithms all share a common shape:
+\begin{enumerate}
+    \item Enumerate candidate partitions for the current node.
+    \item Score each candidate using a heuristic estimate.
+    \item Pick the best-scoring candidate and recurse.
+\end{enumerate}
+
+The score function is a heuristic \textit{estimate} of downstream cost. A natural improvement: \textbf{don't trust the heuristic; build the subtrees and measure the actual cost}. This is beam search at width $K$.
+
+\subsection{Beam Search Formulation}
+
+\begin{algorithmic}[1]
+\STATE \textbf{function} buildX($P$, $L$, $K$)
+\STATE candidates $\gets$ enumerate($P$, $L$)
+\STATE topK $\gets$ sort(candidates, key=score)$[:K]$
+\FOR{each $c$ in topK}
+    \STATE leftSub $\gets$ buildX($c.P_1$, $L/2$, $K$)
+    \STATE rightSub $\gets$ buildX($c.P_2$, $L/2$, $K$)
+    \STATE cost $\gets$ subtreeTotalCost($c$, leftSub, rightSub)
+\ENDFOR
+\RETURN candidate with minimum cost
+\end{algorithmic}
+
+When $K = 1$, this is identical to the original greedy algorithm. When $K \to \infty$, it is exhaustive search. \textbf{The default in this work is $K = 3$.}
+
+\subsection{Memoization}
+
+Without further optimization, beam search is $O(K^d)$ build calls per top-level construction. \textbf{Memoization} saves us: the same $(P, L)$ sub-problem appears in many places. Caching $(P, L) \to \text{bestSubtree}$ collapses repeated work.
+
+\subsubsection{Canonical Key}
+
+A stable, order-independent key for the cache:
+$$\text{canonKey}(P, L) = \text{sort\_lexicographic}(P).\text{join}(\texttt{`|'}) + \texttt{`@'} + L$$
+
+\subsubsection{Level Correction: cloneWithLevel}
+
+A memoized subtree built first at depth 2 may later be reused at depth 5. The \texttt{level} field on each node is required by the parallelism metric, so a stale-level retrieval would silently corrupt that statistic. The helper \texttt{cloneWithLevel} walks the cached subtree and produces a fresh deep-copy with \texttt{level} rewritten to its actual position.
+
+\subsubsection{True Subtree Cost}
+
+The true subtree cost replaces algorithm-specific score estimates:
+\begin{equation}
+\text{cost} = \text{splits}(\text{subtree}) \times w_s + \text{mixes}(\text{subtree}) - \text{dilution}(\text{subtree}) \times w_d
+\end{equation}
+
+With $w_s = 1000$ and $w_d = 5$, splits are the primary objective, mixes are the secondary tiebreaker, and dilution is a small bonus.
+
+\subsection{Memoization-Only for AP-DP}
+
+AP-DP intentionally retains its myopic local-scoring identity---adding beam search would erase its character as a comparison baseline. Memoization alone is applied so repeated sub-problems are cached.
+
+\subsection{Cost--Benefit Summary}
+
+\begin{itemize}
+    \item \textbf{Compute overhead:} $\sim$10$\times$ wall-time vs.\ greedy baselines for LARP; $\sim$100$\times$ for ILP.
+    \item \textbf{Quality gain:} $\sim$14\% reduction in splits and mixes, with a small dilution regression as a trade-off.
+\end{itemize}

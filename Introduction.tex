@@ -1,0 +1,186 @@
+% Chapter 1: Introduction
+% Covers thesis.md §1 (Problem Domain), §2 (Formal Problem Statement), §3 (Metrics)
+
+This chapter introduces the problem domain of digital microfluidic biochips, formulates the mixing-tree construction problem, and defines the metrics used to evaluate mixing-tree quality throughout this work.
+
+\section{Digital Microfluidic Biochips}
+
+A \textbf{Digital Microfluidic Biochip (DMFB)} is a lab-on-a-chip device that manipulates discrete picolitre-to-nanolitre droplets on a two-dimensional grid of electrodes. By cycling voltages on adjacent electrodes, the chip exploits the \textit{electrowetting-on-dielectric} (EWOD) phenomenon to \textbf{transport, merge, split, and dispense} droplets without any moving parts. The same hardware platform can therefore execute a wide variety of biochemical protocols---clinical diagnostics, DNA sequencing by synthesis, point-of-care testing, polymerase-chain-reaction (PCR) preparation, immunoassays, and tissue-engineering workflows---by reprogramming the electrode actuation sequence rather than redesigning the chip.
+
+Four primitive droplet operations exist on a DMFB, as summarized in Table~\ref{tab:primitives}.
+
+\begin{table}[H]
+\centering
+\caption{Primitive droplet operations on a DMFB.}
+\label{tab:primitives}
+\begin{tabular}{|l|p{10cm}|}
+\hline
+\textbf{Primitive} & \textbf{Description} \\
+\hline
+Dispense & Inject a droplet of a pure reagent or sample from a boundary reservoir onto the array \\
+\hline
+Transport & Move a droplet across electrodes (typically 1 cell per clock cycle) \\
+\hline
+Mix (merge) & Bring two droplets onto adjacent electrodes; they coalesce into one droplet of summed volume \\
+\hline
+Split & Detach a single droplet into two equal-volume daughter droplets via simultaneous opposite pulls \\
+\hline
+\end{tabular}
+\end{table}
+
+The mix operation is \textit{volume-conservative} and \textit{ratio-conservative}: a mix of two equal-volume droplets of compositions $A$ and $B$ produces a new droplet of composition $(A + B) / 2$. There is no native on-chip operation that mixes in any ratio other than 50:50 from two equal-volume droplets. Any non-50:50 outcome must be synthesized by a \textbf{sequence} of 50:50 mixes, which is precisely the problem this work addresses.
+
+\section{Sample Preparation}
+
+A \textit{bioassay}---for example a PCR run, ELISA, or a dose-response curve in cytotoxicity studies---typically requires reagents combined in a precise \textbf{volumetric ratio}, e.g., $4:3:2:1:1:1$ of buffer, primer, template, polymerase, dye, and water. The act of producing such a target mixture from pure reservoirs is \textbf{sample preparation}, and on a DMFB it is realized as a sequence of mix-and-split operations forming a \textbf{mixing tree}:
+
+\begin{itemize}
+    \item \textbf{Leaves} of the tree are dispense events, each emitting one unit of one pure reagent.
+    \item \textbf{Internal nodes} are 50:50 mix-merges of their two children's outputs.
+    \item The \textbf{root} is the final droplet whose composition matches the target ratio.
+\end{itemize}
+
+A mixing tree of depth $d$ produces $2^d$ units of total volume, distributed across the reagents in proportions controlled by the multiplicities of leaves.
+
+\section{Why Algorithm Design Matters}
+
+The chip is bandwidth-, time-, and reagent-limited. A poorly chosen mixing tree may:
+
+\begin{itemize}
+    \item Waste expensive reagents (dispensing the same fluid in two different subtrees forces extra dispenses)
+    \item Increase assay completion time (more mix steps = more clock cycles)
+    \item Increase contamination risk (longer paths over previously occupied electrodes)
+    \item Produce unnecessary intermediate droplets that must be discarded as waste
+\end{itemize}
+
+Every metric defined in Section~\ref{sec:metrics} is a proxy for one or more of these physical costs. The optimization problem is \textbf{multi-objective}, and no single algorithm dominates on all metrics---the entire field is built around discovering well-balanced points in this trade-off space.
+
+\section{Formal Problem Statement}
+\label{sec:formal}
+
+\subsection{Inputs}
+
+The inputs to the mixing-tree construction problem are:
+\begin{itemize}
+    \item A target \textbf{ratio} $\mathbf{r} = (r_1, r_2, \ldots, r_n)$ of $n$ reagents.
+    \item A \textbf{depth budget} $d \in \mathbb{Z}^+$ chosen so that the rounding error introduced by approximating real-valued ratios with integers summing to $2^d$ is acceptable for the assay (typical: $d \in [4, 12]$).
+\end{itemize}
+
+\subsection{Pre-processing: Ratio Approximation}
+
+The continuous ratio is rounded to integers summing to $L := 2^d$:
+
+\begin{equation}
+\text{approx}[i] = \text{round}\left(\frac{r_i}{\sum_j r_j} \times 2^d\right) \quad \text{for } i = 1, \ldots, n-1
+\end{equation}
+\begin{equation}
+\text{approx}[n] = 2^d - \sum_{i<n} \text{approx}[i] \quad \text{(last element corrects the sum)}
+\end{equation}
+
+For example, for $\mathbf{r} = [1, 1, 1]$ and $d = 3$: $L = 8$, $\text{approx} = [3, 3, 2]$ (sums to 8, deviation per slot $\leq 1/2^d = 12.5\%$). The per-slot rounding error shrinks geometrically with $d$. For most assays $d \geq 6$ is sufficient ($\leq 1.5\%$ per slot).
+
+\subsection{The Recursive Subproblem}
+
+After ratio approximation, the problem becomes: given a polynomial $P$ (a multiset map from fluid to integer count) with $\sum P = L$, build a binary tree such that:
+\begin{itemize}
+    \item each leaf is $\text{Leaf}(f)$ for some fluid $f$;
+    \item the multiset of leaves of the full tree equals $P$;
+    \item the tree has depth $\leq d_{\max}$ (a bound chosen by the algorithm, typically $d + 8$).
+\end{itemize}
+
+By the binary halving structure: at each internal node with input polynomial $P$ and volume $L$, the algorithm must split $P$ into two sub-polynomials $P_1 + P_2 = P$ such that $\sum P_1 = \sum P_2 = L/2$, then recurse on each.
+
+\subsection{Optimization Objectives}
+
+Subject to the tree constraints, minimize a multi-objective vector consisting of:
+\begin{itemize}
+    \item $m$ --- number of mix operations (internal nodes)
+    \item $\text{splits}$ --- number of fluid-split events across all internal nodes
+    \item $l$ --- total dilution-subtree depth
+    \item $\text{maxL}$ --- longest single dilution chain
+    \item $\text{leaves}$ --- number of leaf dispense events
+    \item $p$ --- maximum tree width (parallelism / footprint)
+    \item $d$ --- tree depth (largely determined by input)
+\end{itemize}
+
+There is no single canonical scalar objective; different chips, assays, and reagent costs weight these differently. This work provides each metric independently and reports per-test composite wins.
+
+\section{Metrics and Definitions}
+\label{sec:metrics}
+
+For a binary tree $T$, with $\text{internal}(T)$ and $\text{leaves}(T)$ as its internal and leaf node sets, the following metrics are defined.
+
+\subsection{Mix Count ($m$)}
+
+\begin{equation}
+m(T) = |\text{internal}(T)|
+\end{equation}
+
+Each internal node corresponds to one droplet-merge cycle on the chip. Lower is better---fewer mix operations means shorter assay time.
+
+\subsection{Splits}
+
+A \textit{fluid split} at internal node $v$ exists for each fluid $f$ such that $f$ appears in \textbf{both} subtrees rooted at $v.\text{left}$ and $v.\text{right}$. Formally:
+
+\begin{equation}
+\text{splits}(T) = \sum_{v \in \text{internal}(T)} |\{ f : f \in \text{fluids}(v.\text{left}) \cap \text{fluids}(v.\text{right}) \}|
+\end{equation}
+
+Each split forces the corresponding reagent to be dispensed from the boundary reservoir at least twice. Lower is better.
+
+\subsection{Dilution Length ($l$)}
+
+A \textit{dilution subtree} is a maximal subtree containing \textbf{at most two} distinct fluids. In such a subtree, the only operation is repeated 50:50 mixing of the same two species---a \textit{serial dilution}---which is hardware-cheap because reagents need not be re-dispensed.
+
+\begin{equation}
+l(T) = \sum_{\substack{u:\, u \text{ is root of a} \\ \text{dilution subtree}}} (\text{depth}(u) - 1)
+\end{equation}
+
+Higher is better---longer dilution chains imply better routing locality and less cross-contamination.
+
+\subsection{Max Dilution Chain ($\text{maxL}$)}
+
+\begin{equation}
+\text{maxL}(T) = \max_{\substack{u:\, u \text{ is root of a} \\ \text{dilution subtree}}} (\text{depth}(u) - 1)
+\end{equation}
+
+The single longest serial dilution chain in the tree.
+
+\subsection{Leaves}
+
+\begin{equation}
+\text{leaves}(T) = |\text{leaves}(T)|
+\end{equation}
+
+Number of dispense events. Lower is better.
+
+\subsection{Parallelism ($p$)}
+
+\begin{equation}
+p(T) = \max_{\ell} |\{ v \in \text{internal}(T) : \text{level}(v) = \ell \}|
+\end{equation}
+
+Maximum number of concurrent mix operations at any single tree level. Lower is generally better (smaller chip footprint required, less scheduling pressure).
+
+\subsection{Depth ($d$)}
+
+\begin{equation}
+d(T) = \text{height}(T) - 1
+\end{equation}
+
+Constrained by the input volume $L = 2^d$ and the algorithm's depth budget; usually invariant across algorithms for the same input.
+
+\section{Contributions of This Work}
+
+This work makes the following contributions:
+
+\begin{enumerate}
+    \item \textbf{Three new mixing-tree construction algorithms}: Adaptive Partitioning via Dynamic Programming (AP-DP), Lookahead-Augmented Recursive Partitioning (LARP), and an Integer-Allocation DP heuristic (ILP).
+    \item \textbf{A beam-search with memoization meta-framework} applicable to any partitioning-based mixing-tree algorithm, yielding 9--14\% improvement on the design objective.
+    \item \textbf{A 323-test stratified empirical benchmark} with 7 metrics, deterministic seed, and full reproducibility.
+    \item \textbf{Identification of the splits-versus-dilution trade-off curve}, with a quantified ``balanced'' operating point occupied by the proposed algorithms.
+\end{enumerate}
+
+\section{Organization of the Report}
+
+The remainder of this report is organized as follows. Chapter~2 reviews existing algorithms in the literature. Chapter~3 presents the proposed algorithms and the beam-search meta-framework. Chapter~4 describes the benchmarking framework and visualization tool. Chapter~5 presents experimental results. Chapter~6 discusses the trade-offs and implications. Chapter~7 concludes with limitations and future work.
