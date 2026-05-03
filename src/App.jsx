@@ -1,11 +1,23 @@
 import { useState, useRef, useEffect } from "react";
+import OptimizerPage from "./Optimizer";
 
 // ========== RATIO APPROXIMATION ==========
 function ratioApprox(ratios, d) {
-  const Lp = 2 ** d, L = ratios.reduce((a, b) => a + b, 0);
-  const ap = ratios.map(a => Math.round((a * Lp) / L));
+  const Lp = 2 ** d;
+  const L = ratios.reduce((a, b) => a + b, 0);
+  const exact = ratios.map(a => (a * Lp) / L);
+  const ap = exact.map(Math.floor);
   for (let i = 0; i < ap.length; i++) if (ap[i] <= 0) ap[i] = 1;
-  ap[ap.length - 1] = Math.max(1, Lp - ap.slice(0, -1).reduce((a, b) => a + b, 0));
+  let currentSum = ap.reduce((a, b) => a + b, 0);
+  let remainders = exact.map((val, i) => ({ idx: i, rem: val - ap[i] })).sort((a, b) => b.rem - a.rem);
+  let i = 0;
+  while (currentSum < Lp && i < remainders.length) { ap[remainders[i].idx]++; currentSum++; i++; }
+  while (currentSum < Lp) { ap[0]++; currentSum++; }
+  while (currentSum > Lp) {
+    let maxIdx = 0;
+    for (let j = 1; j < ap.length; j++) if (ap[j] > ap[maxIdx]) maxIdx = j;
+    if (ap[maxIdx] > 1) { ap[maxIdx]--; currentSum--; } else break;
+  }
   return ap;
 }
 
@@ -900,6 +912,65 @@ function buildILP(P, L, maxD, lv = 0) {
   };
 }
 
+// ========== HARP: Hybrid Adaptive Recursive Partitioning ==========
+function harpScore(cand, L, lv, maxD) {
+  const { P1, P2, splits } = cand;
+  const half = L / 2;
+  const k1 = Object.keys(P1).filter(k => P1[k] > 0);
+  const k2 = Object.keys(P2).filter(k => P2[k] > 0);
+  const n1 = k1.length, n2 = k2.length;
+  
+  const depthRatio = Math.min(1.0, lv / 6.0);
+  
+  const opWeight = 100 * (1 - depthRatio * 0.5); 
+  const splitPenalty = splits * opWeight;
+  const fluidPenalty = (n1 + n2) * (opWeight * 0.1);
+  
+  const dilWeight = 100 * (0.5 + depthRatio * 0.5);
+  let dilutionBonus = 0;
+  
+  if (n1 <= 2) dilutionBonus -= 15;
+  if (n2 <= 2) dilutionBonus -= 15;
+  if (n1 === 1) dilutionBonus -= 10;
+  if (n2 === 1) dilutionBonus -= 10;
+  
+  const sum1 = k1.reduce((a, k) => a + P1[k], 0);
+  const sum2 = k2.reduce((a, k) => a + P2[k], 0);
+  for (const k of k1) { if (P1[k] >= sum1 * 0.5) { dilutionBonus -= 8; break; } }
+  for (const k of k2) { if (P2[k] >= sum2 * 0.5) { dilutionBonus -= 8; break; } }
+  
+  return splitPenalty + fluidPenalty + (dilutionBonus * dilWeight / 100);
+}
+
+function buildHARP(P, L, maxD, lv = 0) {
+  const keys = Object.keys(P).filter(k => P[k] > 0);
+  if (!keys.length) return null;
+  if (keys.length === 1) return { label: keys[0], volume: P[keys[0]], level: lv, leaf: true, partition: { [keys[0]]: P[keys[0]] } };
+  if (L <= 1 || lv >= maxD) {
+    const s = Object.entries(P).sort((a, b) => b[1] - a[1]);
+    return { label: s[0][0], volume: L, level: lv, leaf: true, partition: { ...P } };
+  }
+
+  const half = L / 2;
+  const candidates = larpEnumPartitions(P, L);
+  if (candidates.length === 0) {
+    const s = Object.entries(P).sort((a, b) => b[1] - a[1]);
+    return { label: s[0][0], volume: L, level: lv, leaf: true, partition: { ...P } };
+  }
+
+  let bestCand = candidates[0], bestScore = harpScore(candidates[0], L, lv, maxD);
+  for (let i = 1; i < candidates.length; i++) {
+    const sc = harpScore(candidates[i], L, lv, maxD);
+    if (sc < bestScore) { bestScore = sc; bestCand = candidates[i]; }
+  }
+
+  return {
+    label: "Mix", partition: { ...P }, volume: L, level: lv, leaf: false,
+    left: buildHARP(bestCand.P1, half, maxD, lv + 1),
+    right: buildHARP(bestCand.P2, half, maxD, lv + 1)
+  };
+}
+
 // ========== Tree utilities ==========
 function layoutTree(root) {
   let idx = 0; const nodes = [], edges = [];
@@ -955,19 +1026,21 @@ function TreeView({ treeData, allFluids }) {
   const { nodes, edges } = treeData;
   const cx = n => n._x * (nW + gX) + nW / 2 + 14, cy = n => n._y * (nH + gY) + nH / 2 + 14;
   return (
-    <div ref={ref} style={{ flex: 1, overflow: "hidden", cursor: drag.current ? "grabbing" : "grab", background: "#0c1222", borderRadius: 6, minHeight: 180 }}
+    <div ref={ref} style={{ flex: 1, overflow: "hidden", cursor: drag.current ? "grabbing" : "grab", minHeight: 180, width: "100%", height: "100%" }}
       onMouseDown={e => { drag.current = true; last.current = { x: e.clientX, y: e.clientY }; }}
       onMouseMove={e => { if (!drag.current) return; setTf(t => ({ ...t, x: t.x + e.clientX - last.current.x, y: t.y + e.clientY - last.current.y })); last.current = { x: e.clientX, y: e.clientY }; }}
       onMouseUp={() => drag.current = false} onMouseLeave={() => drag.current = false}
       onWheel={e => { e.preventDefault(); const f = e.deltaY < 0 ? 1.15 : 0.87; setTf(t => ({ ...t, k: Math.min(6, Math.max(0.02, t.k * f)) })); }}>
       <svg width="100%" height="100%"><g transform={`translate(${tf.x},${tf.y}) scale(${tf.k})`}>
-        {edges.map((e, i) => e.to && <line key={i} x1={cx(e.from)} y1={cy(e.from) + nH / 2} x2={cx(e.to)} y2={cy(e.to) - nH / 2} stroke="#334155" strokeWidth={.9} />)}
+        {edges.map((e, i) => e.to && <line key={i} x1={cx(e.from)} y1={cy(e.from) + nH / 2} x2={cx(e.to)} y2={cy(e.to) - nH / 2} stroke="#999" strokeWidth={1} />)}
         {nodes.map((n, i) => {
           const x = cx(n) - nW / 2, y = cy(n) - nH / 2;
-          if (n.leaf) { const c = fc(n.label, allFluids); return <g key={i}><rect x={x} y={y} width={nW} height={nH} rx={5} fill={c + "22"} stroke={c} strokeWidth={1.2} /><text x={cx(n)} y={cy(n) + 1} textAnchor="middle" dominantBaseline="middle" fill={c} fontSize={9} fontWeight={700}>{n.label}</text></g>; }
+          if (n.leaf) { const c = fc(n.label, allFluids); return <g key={i}><rect x={x} y={y} width={nW} height={nH} rx={4} fill={c + "30"} stroke={c} strokeWidth={1.5} /><text x={cx(n)} y={cy(n) + 1} textAnchor="middle" dominantBaseline="middle" fill={c} fontSize={10} fontWeight={700}>{n.label}</text></g>; }
           const tot = Object.values(n.partition).reduce((a, b) => a + b, 0); const bars = []; let off = 0;
-          Object.entries(n.partition).sort((a, b) => allFluids.indexOf(a[0]) - allFluids.indexOf(b[0])).forEach(([f, v]) => { const w = (v / tot) * (nW - 3); bars.push({ x: off, w: Math.max(w, .3), c: fc(f, allFluids) }); off += w; });
-          return <g key={i}><rect x={x} y={y} width={nW} height={nH} rx={5} fill="#1e293b" stroke="#475569" strokeWidth={.7} /><text x={cx(n)} y={cy(n) - 2} textAnchor="middle" fill="#cbd5e1" fontSize={7} fontWeight={600}>Mix</text><g transform={`translate(${x + 1.5},${cy(n) + 5})`}>{bars.map((b, j) => <rect key={j} x={b.x} y={0} width={b.w} height={3} rx={.8} fill={b.c} opacity={.85} />)}</g></g>;
+          const sortedEntries = Object.entries(n.partition).sort((a, b) => allFluids.indexOf(a[0]) - allFluids.indexOf(b[0]));
+          sortedEntries.forEach(([f, v]) => { const w = (v / tot) * (nW - 4); bars.push({ x: off, w: Math.max(w, .5), c: fc(f, allFluids) }); off += w; });
+          const ratioStr = sortedEntries.map(e => e[1]).join(":");
+          return <g key={i}><rect x={x} y={y} width={nW} height={nH} rx={4} fill="#f0f0f0" stroke="#888" strokeWidth={1} /><text x={cx(n)} y={cy(n) - 3} textAnchor="middle" fill="#333" fontSize={8} fontWeight={600}>{ratioStr}</text><g transform={`translate(${x + 2},${cy(n) + 5})`}>{bars.map((b, j) => <rect key={j} x={b.x} y={0} width={b.w} height={5} rx={1} fill={b.c} />)}</g></g>;
         })}
       </g></svg>
     </div>
@@ -978,20 +1051,20 @@ function TreeView({ treeData, allFluids }) {
 function InputPanel({ raw, setRaw, depth, setDepth, onGen }) {
   return (
     <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 7 }}>
-      <label style={{ fontSize: 11 }}>Ratios: <input value={raw} onChange={e => setRaw(e.target.value)} style={{ marginLeft: 3, padding: "3px 6px", width: 180, background: "#0f172a", border: "1px solid #334155", borderRadius: 4, color: "#e2e8f0", fontSize: 11 }} /></label>
-      <label style={{ fontSize: 11 }}>d: <input type="number" value={depth} min={2} max={14} onChange={e => setDepth(+e.target.value)} style={{ marginLeft: 3, padding: "3px 6px", width: 42, background: "#0f172a", border: "1px solid #334155", borderRadius: 4, color: "#e2e8f0", fontSize: 11 }} /></label>
-      <button onClick={onGen} style={{ padding: "4px 13px", background: "#6366f1", border: "none", borderRadius: 5, color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 11 }}>Generate</button>
+      <label style={{ fontSize: 12, color: "#475569" }}>Ratios: <input value={raw} onChange={e => setRaw(e.target.value)} style={{ marginLeft: 3, padding: "4px 8px", width: 180, border: "1px solid #d1d5db", borderRadius: 4, fontSize: 12 }} /></label>
+      <label style={{ fontSize: 12, color: "#475569" }}>d: <input type="number" value={depth} min={2} max={14} onChange={e => setDepth(+e.target.value)} style={{ marginLeft: 3, padding: "4px 8px", width: 50, border: "1px solid #d1d5db", borderRadius: 4, fontSize: 12 }} /></label>
+      <button onClick={onGen} style={{ padding: "5px 14px", background: "#4f46e5", border: "none", borderRadius: 5, color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 12 }}>Generate</button>
     </div>
   );
 }
 function Legend({ allFluids, adj }) {
   return <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 4 }}>
-    {allFluids.map((f, i) => adj[i] > 0 && <span key={f} style={{ display: "flex", alignItems: "center", gap: 2, fontSize: 10 }}><span style={{ width: 7, height: 7, borderRadius: 2, background: fc(f, allFluids), display: "inline-block" }} />{f}={adj[i]}</span>)}
-    <span style={{ fontSize: 9, color: "#475569", marginLeft: "auto" }}>scroll · drag</span>
+    {allFluids.map((f, i) => adj[i] > 0 && <span key={f} style={{ display: "flex", alignItems: "center", gap: 2, fontSize: 11, color: "#475569" }}><span style={{ width: 8, height: 8, borderRadius: 2, background: fc(f, allFluids), display: "inline-block" }} />{f}={adj[i]}</span>)}
+    <span style={{ fontSize: 10, color: "#94a3b8", marginLeft: "auto" }}>scroll · drag</span>
   </div>;
 }
 function Stat({ label, value, color, best }) {
-  return <div style={{ background: best ? `${color}15` : "#1e293b", borderRadius: 6, padding: "5px 10px", minWidth: 62, border: `1px solid ${best ? color : color + "33"}` }}><div style={{ fontSize: 8, color: "#94a3b8" }}>{label}</div><div style={{ fontSize: 15, fontWeight: 800, color }}>{value}</div></div>;
+  return <div style={{ background: best ? `${color}10` : "#fff", borderRadius: 6, padding: "5px 10px", minWidth: 62, border: `1px solid ${best ? color : "#e2e8f0"}` }}><div style={{ fontSize: 9, color: "#94a3b8" }}>{label}</div><div style={{ fontSize: 15, fontWeight: 800, color }}>{value}</div></div>;
 }
 
 function getStats(root) {
@@ -1004,6 +1077,7 @@ function buildTree(algo, adj, fl, depth) {
   if (algo === "rma") return buildRMA(d, 2 ** depth);
   if (algo === "larp") return buildLARP(d, 2 ** depth, depth + 8);
   if (algo === "ilp") return buildILP(d, 2 ** depth, depth + 8);
+  if (algo === "harp") return buildHARP(d, 2 ** depth, depth + 8);
   return buildAPDP(d, 2 ** depth, depth + 8);
 }
 
@@ -1019,9 +1093,9 @@ function AlgoPage({ raw, setRaw, depth, setDepth, algo, title, icon, color, desc
   useEffect(gen, []);
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{ padding: "9px 12px", background: "#1e293b", borderRadius: 8, marginBottom: 6, flexShrink: 0 }}>
-        <h2 style={{ margin: "0 0 2px", fontSize: 13, fontWeight: 800, color }}>{icon} {title}</h2>
-        <p style={{ margin: "0 0 6px", fontSize: 10, color: "#94a3b8", lineHeight: 1.3 }}>{desc}</p>
+      <div style={{ padding: "12px 14px", background: "#fff", borderRadius: 8, marginBottom: 6, flexShrink: 0, border: "1px solid #e2e8f0" }}>
+        <h2 style={{ margin: "0 0 2px", fontSize: 14, fontWeight: 700, color }}>{icon} {title}</h2>
+        <p style={{ margin: "0 0 6px", fontSize: 11, color: "#64748b", lineHeight: 1.3 }}>{desc}</p>
         <InputPanel raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} onGen={gen} />
         <Legend allFluids={allF} adj={adj} />
         {stats && <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 3 }}>
@@ -1041,9 +1115,9 @@ function AlgoPage({ raw, setRaw, depth, setDepth, algo, title, icon, color, desc
 
 function ComparePage({ raw, setRaw, depth, setDepth }) {
   const [data, setData] = useState(null), [allF, setAllF] = useState([]), [adj, setAdj] = useState([]);
-  const algos = ["rma", "bs", "apdp", "larp", "ilp"];
-  const aL = { rma: "RMA", bs: "BS", apdp: "AP-DP", larp: "LARP", ilp: "ILP" };
-  const aC = { rma: "#6366f1", bs: "#f59e0b", apdp: "#06b6d4", larp: "#ef4444", ilp: "#84cc16" };
+  const algos = ["rma", "bs", "apdp", "larp", "ilp", "harp"];
+  const aL = { rma: "RMA", bs: "BS", apdp: "AP-DP", larp: "LARP", ilp: "ILP", harp: "HARP" };
+  const aC = { rma: "#4f46e5", bs: "#d97706", apdp: "#0891b2", larp: "#dc2626", ilp: "#16a34a", harp: "#9333ea" };
   const gen = () => {
     const r = raw.split(",").map(Number).filter(n => !isNaN(n) && n > 0); if (r.length < 2) return;
     const a = ratioApprox(r, depth); setAdj(a);
@@ -1070,52 +1144,51 @@ function ComparePage({ raw, setRaw, depth, setDepth }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "auto" }}>
-      <div style={{ padding: "9px 12px", background: "#1e293b", borderRadius: 8, marginBottom: 8, flexShrink: 0 }}>
-        <h2 style={{ margin: "0 0 2px", fontSize: 13, fontWeight: 800, color: "#10b981" }}>📊 Five-Way Comparison</h2>
-        <p style={{ margin: "0 0 6px", fontSize: 10, color: "#94a3b8" }}>RMA vs BS vs AP-DP vs LARP vs ILP. Lower m/leaves/splits better. Higher l/maxL better. d/p depend on chip.</p>
+      <div style={{ padding: "12px 14px", background: "#fff", borderRadius: 8, marginBottom: 8, flexShrink: 0, border: "1px solid #e2e8f0" }}>
+        <h2 style={{ margin: "0 0 2px", fontSize: 14, fontWeight: 700, color: "#059669" }}>Five-Way Comparison</h2>
+        <p style={{ margin: "0 0 6px", fontSize: 11, color: "#64748b" }}>RMA vs BS vs AP-DP vs LARP vs ILP. Lower m/leaves/splits better. Higher l/maxL better.</p>
         <InputPanel raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} onGen={gen} />
         <Legend allFluids={allF} adj={adj} />
       </div>
       {data && <>
-        <div style={{ background: "#1e293b", borderRadius: 8, padding: 12, marginBottom: 8 }}>
+        <div style={{ background: "#fff", borderRadius: 8, padding: 12, marginBottom: 8, border: "1px solid #e2e8f0" }}>
           {metrics.map(m => {
             const mx = Math.max(...algos.map(a => data[a]?.[m] ?? 0), 1);
             return <div key={m} style={{ marginBottom: 10 }}>
-              <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>{mL[m]}</div>
+              <div style={{ fontSize: 11, color: "#64748b", marginBottom: 3 }}>{mL[m]}</div>
               {algos.map(a => <div key={a} style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 2 }}>
-                <span style={{ width: 34, fontSize: 9, color: aC[a], fontWeight: 700 }}>{aL[a]}</span>
-                <div style={{ flex: 1, background: "#0f172a", borderRadius: 3, height: 16, position: "relative", overflow: "hidden" }}>
-                  <div style={{ width: `${((data[a]?.[m] ?? 0) / mx) * 100}%`, height: "100%", background: `${mC[m]}45`, borderRadius: 3 }} />
-                  <span style={{ position: "absolute", right: 4, top: 0, fontSize: 10, fontWeight: 700, color: "#e2e8f0" }}>{data[a]?.[m] ?? "—"}</span>
+                <span style={{ width: 38, fontSize: 10, color: aC[a], fontWeight: 700 }}>{aL[a]}</span>
+                <div style={{ flex: 1, background: "#f1f5f9", borderRadius: 3, height: 18, position: "relative", overflow: "hidden" }}>
+                  <div style={{ width: `${((data[a]?.[m] ?? 0) / mx) * 100}%`, height: "100%", background: `${mC[m]}30`, borderRadius: 3 }} />
+                  <span style={{ position: "absolute", right: 4, top: 1, fontSize: 11, fontWeight: 700, color: "#1e293b" }}>{data[a]?.[m] ?? "—"}</span>
                 </div>
               </div>)}
             </div>;
           })}
         </div>
-        <div style={{ background: "#1e293b", borderRadius: 8, padding: 12 }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10 }}>
-            <thead><tr style={{ borderBottom: "1px solid #334155" }}>
-              <th style={{ textAlign: "left", padding: "3px 5px", color: "#94a3b8" }}>Metric</th>
-              {algos.map(a => <th key={a} style={{ textAlign: "center", padding: "3px 5px", color: aC[a] }}>{aL[a]}</th>)}
-              <th style={{ textAlign: "center", padding: "3px 5px", color: "#10b981" }}>Best</th>
+        <div style={{ background: "#fff", borderRadius: 8, padding: 12, border: "1px solid #e2e8f0" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+            <thead><tr style={{ borderBottom: "2px solid #e2e8f0" }}>
+              <th style={{ textAlign: "left", padding: "4px 6px", color: "#64748b", fontWeight: 600 }}>Metric</th>
+              {algos.map(a => <th key={a} style={{ textAlign: "center", padding: "4px 6px", color: aC[a], fontWeight: 600 }}>{aL[a]}</th>)}
+              <th style={{ textAlign: "center", padding: "4px 6px", color: "#059669", fontWeight: 700 }}>Best</th>
             </tr></thead>
             <tbody>{metrics.map(m => {
               const w = winner(m);
-              const wc = w === "Tie" ? "#64748b" : w === "varies" ? "#94a3b8" : w.includes("ILP") ? "#84cc16" : w.includes("LARP") ? "#ef4444" : w.includes("AP-DP") ? "#06b6d4" : w.includes("RMA") ? "#6366f1" : "#f59e0b";
-              return <tr key={m} style={{ borderBottom: "1px solid #1a2332" }}>
-                <td style={{ padding: "3px 5px", color: "#cbd5e1" }}>{mL[m]}</td>
-                {algos.map(a => <td key={a} style={{ textAlign: "center", padding: "3px 5px", fontWeight: 700 }}>{data[a]?.[m] ?? "—"}</td>)}
-                <td style={{ textAlign: "center", padding: "3px 5px", fontWeight: 800, color: wc }}>{w === "Tie" ? "—" : w === "varies" ? "varies" : `✓ ${w}`}</td>
+              const wc = w === "Tie" ? "#94a3b8" : w === "varies" ? "#94a3b8" : w.includes("ILP") ? "#16a34a" : w.includes("LARP") ? "#dc2626" : w.includes("AP-DP") ? "#0891b2" : w.includes("RMA") ? "#4f46e5" : "#d97706";
+              return <tr key={m} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                <td style={{ padding: "4px 6px", color: "#475569" }}>{mL[m]}</td>
+                {algos.map(a => <td key={a} style={{ textAlign: "center", padding: "4px 6px", fontWeight: 700, color: "#1e293b" }}>{data[a]?.[m] ?? "—"}</td>)}
+                <td style={{ textAlign: "center", padding: "4px 6px", fontWeight: 700, color: wc }}>{w === "Tie" ? "—" : w === "varies" ? "varies" : `✓ ${w}`}</td>
               </tr>;
             })}</tbody>
           </table>
-          <div style={{ marginTop: 6, fontSize: 9, color: "#64748b", lineHeight: 1.5 }}>
-            <b style={{ color: "#84cc16" }}>ILP v2</b>: Pareto-optimal DP — enumerates Pareto-optimal (splits, fluids) allocations, dilution-aware scoring with 1-level lookahead.<br />
-            <b style={{ color: "#ef4444" }}>LARP v2</b>: 2-level lookahead DP — comprehensive enumeration (zero/single/double splits), dilution-aware scoring.<br />
-            <b style={{ color: "#06b6d4" }}>AP-DP v3</b>: Multi-strategy optimizer — DP whole-fluid, DP+split, RMA-style (all dominants) & greedy candidates with dilution-aware scoring.<br />
-            <b style={{ color: "#6366f1" }}>RMA</b>: Maximises dilution subtree length l for layout mapping (per paper Algorithm 4).<br />
-            <b style={{ color: "#f59e0b" }}>BS</b>: Bit-scanning bottom-up, minimises leaf count.<br />
-            <span style={{ color: "#8b5cf6" }}>l</span>=sum of dilution subtree depths (≤2 fluids), <span style={{ color: "#a855f7" }}>maxL</span>=longest single dilution subtree.
+          <div style={{ marginTop: 8, fontSize: 10, color: "#94a3b8", lineHeight: 1.6 }}>
+            <b style={{ color: "#16a34a" }}>ILP v2</b>: Pareto-optimal DP with dilution-aware scoring.<br />
+            <b style={{ color: "#dc2626" }}>LARP v2</b>: 2-level lookahead DP, comprehensive enumeration.<br />
+            <b style={{ color: "#0891b2" }}>AP-DP v3</b>: Multi-strategy optimizer with dilution-aware scoring.<br />
+            <b style={{ color: "#4f46e5" }}>RMA</b>: Maximises dilution subtree length for layout mapping.<br />
+            <b style={{ color: "#d97706" }}>BS</b>: Bit-scanning bottom-up, minimises leaf count.
           </div>
         </div>
       </>}
@@ -1125,41 +1198,39 @@ function ComparePage({ raw, setRaw, depth, setDepth }) {
 
 // ========== APP ==========
 export default function App() {
-  const [page, setPage] = useState("compare");
+  const [page, setPage] = useState("optimizer");
   const [raw, setRaw] = useState("2,3,5,7,11,13,87");
   const [depth, setDepth] = useState(7);
-  const tabs = [
-    { id: "rma", label: "RMA", icon: "⚗️", color: "#6366f1" },
-    { id: "bs", label: "BS", icon: "🔬", color: "#f59e0b" },
-    { id: "apdp", label: "AP-DP", icon: "⚙️", color: "#06b6d4" },
-    { id: "larp", label: "LARP", icon: "🔮", color: "#ef4444" },
-    { id: "ilp", label: "ILP", icon: "🧮", color: "#84cc16" },
-    { id: "compare", label: "Compare", icon: "📊", color: "#10b981" },
-  ];
+  const tabs = ["optimizer", "compare", "rma", "bs", "apdp", "larp", "ilp"];
+  const tabLabel = { optimizer: "Optimizer", compare: "Compare", rma: "RMA", bs: "BS", apdp: "AP-DP", larp: "LARP", ilp: "ILP" };
   return (
-    <div style={{ display: "flex", height: "100vh", width: "100vw", position: "fixed", top: 0, left: 0, background: "#0f172a", color: "#e2e8f0", fontFamily: "'Inter',system-ui,sans-serif", overflow: "hidden" }}>
-      <div style={{ width: 180, background: "#1e293b", borderRight: "1px solid #334155", display: "flex", flexDirection: "column", flexShrink: 0 }}>
-        <div style={{ padding: "12px 10px 8px", borderBottom: "1px solid #334155" }}>
-          <div style={{ fontSize: 13, fontWeight: 900, background: "linear-gradient(135deg,#6366f1,#06b6d4)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>BioChip Mixer</div>
-          <div style={{ fontSize: 8, color: "#64748b", marginTop: 1 }}>Mixing Tree Algorithms</div>
-        </div>
-        <nav style={{ padding: "6px 4px", flex: 1 }}>
-          {tabs.map(t => <button key={t.id} onClick={() => setPage(t.id)}
-            style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", padding: "6px 8px", marginBottom: 1, background: page === t.id ? `${t.color}18` : "transparent", border: page === t.id ? `1px solid ${t.color}44` : "1px solid transparent", borderRadius: 6, color: page === t.id ? t.color : "#94a3b8", fontWeight: page === t.id ? 700 : 500, fontSize: 11, cursor: "pointer", transition: "all .15s" }}>
-            <span>{t.icon}</span>{t.label}
-          </button>)}
-        </nav>
-        <div style={{ padding: "7px 10px", borderTop: "1px solid #334155", fontSize: 9, color: "#475569", lineHeight: 1.5 }}>
-          Accuracy: 1/2<sup>{depth}</sup><br />Fluids: {raw.split(",").filter(s => s.trim()).length}<br />Total: 2<sup>{depth}</sup> = {2 ** depth}
-        </div>
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      {/* Top nav */}
+      <div style={{ borderBottom: "1px solid #ddd", padding: "8px 16px", display: "flex", alignItems: "center", gap: 16, flexShrink: 0, background: "#fafafa" }}>
+        <strong style={{ fontSize: 15, marginRight: 8 }}>BioChip Mixer</strong>
+        {tabs.map(t => (
+          <button key={t} onClick={() => setPage(t)}
+            style={{
+              background: "none", border: "none", fontSize: 13, padding: "4px 8px",
+              borderBottom: page === t ? "2px solid #2563eb" : "2px solid transparent",
+              color: page === t ? "#2563eb" : "#666", fontWeight: page === t ? 700 : 400,
+            }}>
+            {tabLabel[t]}
+          </button>
+        ))}
+        <span style={{ marginLeft: "auto", fontSize: 11, color: "#999" }}>
+          d={depth} · {raw.split(",").filter(s => s.trim()).length} fluids · 2^{depth}={2 ** depth} units
+        </span>
       </div>
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", padding: 8 }}>
-        {page === "rma" && <AlgoPage raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} algo="rma" title="RMA — Ratioed Mixing" icon="⚗️" color="#6366f1" desc="Largest fluid fills one child → long dilution chains. Best for layout mapping & cross-contamination." />}
-        {page === "bs" && <AlgoPage raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} algo="bs" title="BS — Bit-Scanning [Thies]" icon="🔬" color="#f59e0b" desc="Bottom-up bit scanning. Minimises leaf count (fewest dispensing steps)." />}
-        {page === "apdp" && <AlgoPage raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} algo="apdp" title="AP-DP v3 — Multi-Strategy Adaptive" icon="⚙️" color="#06b6d4" desc="DP subset-sum (all exact subsets) + DP+split (multiple sums) + RMA-style (all dominants) + greedy candidates with dilution-aware scoring." />}
-        {page === "larp" && <AlgoPage raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} algo="larp" title="LARP v2 — 2-Level Lookahead DP" icon="🔮" color="#ef4444" desc="Comprehensive enumeration: zero-split, single-split (multiple sums, both directions), double-split, RMA-style (all dominants). 2-level lookahead with dilution-aware scoring. No artificial caps." />}
-        {page === "ilp" && <AlgoPage raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} algo="ilp" title="ILP v2 — Pareto-Optimal DP" icon="🧮" color="#84cc16" desc="Pareto-optimal candidate enumeration (splits, distinctFluids). Dilution-aware scoring rewards ≤2 fluids per side. 1-level lookahead estimates downstream splits. RMA-style fallback for dominant fluids." />}
+      {/* Content */}
+      <div style={{ flex: 1, overflow: "auto" }}>
+        {page === "rma" && <AlgoPage raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} algo="rma" title="RMA — Ratioed Mixing" icon="" color="#333" desc="Largest fluid fills one child → long dilution chains. Best for layout mapping." />}
+        {page === "bs" && <AlgoPage raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} algo="bs" title="BS — Bit-Scanning" icon="" color="#333" desc="Bottom-up bit scanning. Minimises leaf count." />}
+        {page === "apdp" && <AlgoPage raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} algo="apdp" title="AP-DP v3 — Multi-Strategy" icon="" color="#333" desc="DP subset-sum + split + RMA-style + greedy with dilution-aware scoring." />}
+        {page === "larp" && <AlgoPage raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} algo="larp" title="LARP v2 — Lookahead DP" icon="" color="#333" desc="2-level lookahead with comprehensive enumeration and dilution-aware scoring." />}
+        {page === "ilp" && <AlgoPage raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} algo="ilp" title="ILP v2 — Pareto-Optimal DP" icon="" color="#333" desc="Pareto-optimal allocation enumeration with dilution-aware scoring and lookahead." />}
         {page === "compare" && <ComparePage raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} />}
+        {page === "optimizer" && <OptimizerPage raw={raw} setRaw={setRaw} depth={depth} setDepth={setDepth} buildTreeFn={buildTree} getStatsFn={getStats} ratioApproxFn={ratioApprox} layoutTreeFn={layoutTree} TreeViewCmp={TreeView} />}
       </div>
     </div>
   );

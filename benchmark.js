@@ -2,10 +2,52 @@ import fs from 'fs';
 
 // ========== RATIO APPROXIMATION ==========
 function ratioApprox(ratios, d) {
-    const Lp = 2 ** d, L = ratios.reduce((a, b) => a + b, 0);
-    const ap = ratios.map(a => Math.round((a * Lp) / L));
-    for (let i = 0; i < ap.length; i++) if (ap[i] <= 0) ap[i] = 1;
-    ap[ap.length - 1] = Math.max(1, Lp - ap.slice(0, -1).reduce((a, b) => a + b, 0));
+    const Lp = 2 ** d;
+    const L = ratios.reduce((a, b) => a + b, 0);
+    
+    // Largest Remainder Method (Hare quota)
+    const exact = ratios.map(a => (a * Lp) / L);
+    const ap = exact.map(Math.floor);
+    
+    // Make sure everyone gets at least 1 (if possible/needed, but standard ratios don't allow 0)
+    for (let i = 0; i < ap.length; i++) {
+        if (ap[i] <= 0) ap[i] = 1;
+    }
+    
+    let currentSum = ap.reduce((a, b) => a + b, 0);
+    let remainders = exact.map((val, i) => ({ idx: i, rem: val - ap[i] }));
+    
+    // Sort by largest remainder first
+    remainders.sort((a, b) => b.rem - a.rem);
+    
+    // Distribute remaining units
+    let i = 0;
+    while (currentSum < Lp && i < remainders.length) {
+        ap[remainders[i].idx]++;
+        currentSum++;
+        i++;
+    }
+    
+    // If still less, just dump on the first one
+    while (currentSum < Lp) {
+        ap[0]++;
+        currentSum++;
+    }
+    
+    // If we overshot (because of the minimum 1 enforcement), subtract from the largest
+    while (currentSum > Lp) {
+        let maxIdx = 0;
+        for (let j = 1; j < ap.length; j++) {
+            if (ap[j] > ap[maxIdx]) maxIdx = j;
+        }
+        if (ap[maxIdx] > 1) {
+            ap[maxIdx]--;
+            currentSum--;
+        } else {
+            break;
+        }
+    }
+    
     return ap;
 }
 
@@ -897,6 +939,73 @@ function buildILP(P, L, maxD, lv = 0) {
         label: "Mix", partition: { ...P }, volume: L, level: lv, leaf: false,
         left: buildILP(bestCand.P1, half, maxD, lv + 1),
         right: buildILP(bestCand.P2, half, maxD, lv + 1)
+    };
+}
+
+// ========== HARP: Hybrid Adaptive Recursive Partitioning ==========
+function harpScore(cand, L, lv, maxD) {
+    const { P1, P2, splits } = cand;
+    const half = L / 2;
+    const k1 = Object.keys(P1).filter(k => P1[k] > 0);
+    const k2 = Object.keys(P2).filter(k => P2[k] > 0);
+    const n1 = k1.length, n2 = k2.length;
+    
+    // Adaptive weighting based on depth progression (0.0 at root, 1.0 at maxD)
+    // Actually we reach leaves long before maxD, so we use an expected depth of ~6
+    const depthRatio = Math.min(1.0, lv / 6.0);
+    
+    // Base penalty for operations (splits and distinct fluids)
+    // Weight goes DOWN as depth increases
+    const opWeight = 100 * (1 - depthRatio * 0.5); 
+    const splitPenalty = splits * opWeight;
+    const fluidPenalty = (n1 + n2) * (opWeight * 0.1);
+    
+    // Base reward for dilution (pure fluids, small subsets, dominant fluids)
+    // Weight goes UP as depth increases
+    const dilWeight = 100 * (0.5 + depthRatio * 0.5);
+    let dilutionBonus = 0;
+    
+    if (n1 <= 2) dilutionBonus -= 15;
+    if (n2 <= 2) dilutionBonus -= 15;
+    if (n1 === 1) dilutionBonus -= 10;
+    if (n2 === 1) dilutionBonus -= 10;
+    
+    const sum1 = k1.reduce((a, k) => a + P1[k], 0);
+    const sum2 = k2.reduce((a, k) => a + P2[k], 0);
+    for (const k of k1) { if (P1[k] >= sum1 * 0.5) { dilutionBonus -= 8; break; } }
+    for (const k of k2) { if (P2[k] >= sum2 * 0.5) { dilutionBonus -= 8; break; } }
+    
+    // Combine
+    return splitPenalty + fluidPenalty + (dilutionBonus * dilWeight / 100);
+}
+
+function buildHARP(P, L, maxD, lv = 0) {
+    const keys = Object.keys(P).filter(k => P[k] > 0);
+    if (!keys.length) return null;
+    if (keys.length === 1) return { label: keys[0], volume: P[keys[0]], level: lv, leaf: true, partition: { [keys[0]]: P[keys[0]] } };
+    if (L <= 1 || lv >= maxD) {
+        const s = Object.entries(P).sort((a, b) => b[1] - a[1]);
+        return { label: s[0][0], volume: L, level: lv, leaf: true, partition: { ...P } };
+    }
+
+    const half = L / 2;
+    // We reuse LARP's excellent candidate generator
+    const candidates = larpEnumPartitions(P, L);
+    if (candidates.length === 0) {
+        const s = Object.entries(P).sort((a, b) => b[1] - a[1]);
+        return { label: s[0][0], volume: L, level: lv, leaf: true, partition: { ...P } };
+    }
+
+    let bestCand = candidates[0], bestScore = harpScore(candidates[0], L, lv, maxD);
+    for (let i = 1; i < candidates.length; i++) {
+        const sc = harpScore(candidates[i], L, lv, maxD);
+        if (sc < bestScore) { bestScore = sc; bestCand = candidates[i]; }
+    }
+
+    return {
+        label: "Mix", partition: { ...P }, volume: L, level: lv, leaf: false,
+        left: buildHARP(bestCand.P1, half, maxD, lv + 1),
+        right: buildHARP(bestCand.P2, half, maxD, lv + 1)
     };
 }
 
