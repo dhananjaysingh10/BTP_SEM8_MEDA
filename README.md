@@ -377,9 +377,9 @@ Tests: 323 total
 
 ## Authors
 
-**Dhananjay Singh**  
+**Dhananjay Singh, Kalpit Sancheti, Krishankant Sharma**  
 B.Tech Project — Semester 8  
-National Institute of Technology, Tiruchirappalli (NITT)
+Netaji Subhas University of Technology, Delhi
 
 ---
 
